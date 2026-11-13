@@ -411,13 +411,33 @@ a.srctag:hover { text-decoration: underline; }
   .rnote, .rnote-edit { margin-left: 0; max-width: 100%; }
   .spell-filters select { flex: 1 1 140px; }
 }
-/* === dnd-shared v1.1 (canonical copy: WernerCD/dnd shared/dnd-shared.css) === */
+.pfacts, .ptier { display: none; }
+.row .nm, .card .nm, .linkish { min-height: 24px; }
+@media print {
+  .build-bar, .tabs, .browse, .about, #notice, .mine-help, .handle, .row-btns, .tier, .prep, .rnote-edit, #rulesNotes { display: none !important; }
+  .layout { display: block; }
+  .mine, body.show-mine .mine { display: block !important; position: static; }
+  .mine-inner { max-height: none; overflow: visible; border: 0; box-shadow: none; padding: 0; }
+  .rules-card { border: 1px solid #999; box-shadow: none; margin: 10px 0; padding: 8px 12px; }
+  .rules-card .stat { padding: 4px 8px; }
+  .mine .rows button.nm, .rules-card button.nm { display: inline !important; font-weight: 600; color: #000; }
+  .row { break-inside: avoid; padding: 4px 0; border-bottom: 1px solid #ccc; }
+  .row.locked .nm { opacity: 1; }
+  .rank { color: #000; }
+  .pfacts { display: block; flex-basis: 100%; margin-left: 20px; font-size: .78rem; color: #333; }
+  .ptier { display: inline-block; font-size: .72rem; font-weight: 700; border: 1px solid #000; border-radius: 4px; padding: 0 5px; }
+  .rnote { margin-left: 20px; }
+  .grp { break-inside: auto; }
+  .grp h3 { color: #000; break-after: avoid; }
+  .fixmark { width: auto; }
+}
+/* === dnd-shared v1.4 (canonical copy: WernerCD/dnd shared/dnd-shared.css) === */
 /* Paste this block unchanged at the END of each site's styles.css. Do not edit it per site;
    change it in the hub repo and re-copy it to every site. It relies on the shared tokens
    (--bg, --surface, --surface-2, --ink, --ink-2, --muted, --line, --accent, --gold, --radius). */
 .site-header { background: var(--surface); border-bottom: 1px solid var(--line); }
 .hub-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 10px; font-size: .85rem; }
-.hub-bar a { color: var(--muted); font-weight: 500; text-decoration: none; border-radius: 6px; }
+.hub-bar a { color: var(--muted); font-weight: 500; text-decoration: none; border-radius: 6px; display: inline-flex; align-items: center; min-height: 24px; }
 .hub-bar a:hover, .hub-bar a:focus-visible { color: var(--accent); text-decoration: underline; }
 .hub-bar a[aria-current="page"] { color: var(--ink); }
 .hub-nav { display: flex; gap: 14px; }
@@ -431,7 +451,7 @@ a.srctag:hover { text-decoration: underline; }
 
 .site-footer { border-top: 1px solid var(--line); margin-top: 40px; padding: 20px 0 36px; color: var(--muted); font-size: .86rem; }
 .site-footer .foot-links { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 10px; padding: 0; list-style: none; }
-.site-footer .foot-links a { color: var(--ink-2); }
+.site-footer .foot-links a { color: var(--ink-2); display: inline-flex; align-items: center; min-height: 24px; }
 .site-footer .foot-links a[aria-current="page"] { color: var(--ink); font-weight: 600; text-decoration: none; }
 .site-footer p { margin: 6px 0; max-width: 80ch; }
 
@@ -445,4 +465,13 @@ a.srctag:hover { text-decoration: underline; }
 .change-day li { margin: 6px 0; color: var(--ink-2); line-height: 1.5; }
 .change-day li b { color: var(--ink); }
 @media (max-width: 480px) { .hub-nav { gap: 10px; } .tagline { font-size: .85rem; } }
-/* === end dnd-shared v1.1 === */
+/* print: paper-friendly, no chrome. Sites add their own rules to hide tool controls. */
+@media print {
+  :root, :root:not([data-theme="light"]), :root[data-theme="dark"] { --bg: #fff; --surface: #fff; --surface-2: #f3f3f3; --ink: #000; --ink-2: #222; --muted: #555; --line: #bbb; --shadow: none; color-scheme: light; }
+  body { background: #fff; }
+  .hub-bar, #themeBtn, .site-footer .foot-links, button, dialog::backdrop { display: none !important; }
+  .site-header { border-bottom: 1px solid #000; }
+  a { color: inherit; text-decoration: none; }
+  .card, .change-day li, .statblock { break-inside: avoid; }
+}
+/* === end dnd-shared v1.4 === */

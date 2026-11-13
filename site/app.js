@@ -533,7 +533,7 @@
       var slotTxt = lv === 0 ? '' : P.pact ? (lv <= P.pact.lvl ? 'pact slots' : (P.arcanum && P.arcanum.indexOf(lv) >= 0 ? 'Mystic Arcanum' : 'not yet')) : (P.slots[lv - 1] ? P.slots[lv - 1] + ' slot' + (P.slots[lv - 1] === 1 ? '' : 's') : 'not yet');
       html += '<section class="grp" data-lv="' + lv + '"><h3>' + (lv === 0 ? 'Cantrips' : 'Level ' + lv) + ' <span class="n">' + g.items.length + '</span>' + (slotTxt ? '<span class="gslots">' + slotTxt + '</span>' : '') + '</h3><ul class="rows">';
       g.fixed.forEach(function (sp) {
-        html += '<li class="row fixed"><span class="fixmark" aria-hidden="true">\u2605</span><button type="button" class="linkish nm" data-open="' + sp.id + '">' + esc(sp.name) + '</button><span class="tag t-sub">' + KIND[SS[sp.id].kind] + '</span></li>';
+        html += '<li class="row fixed"><span class="fixmark" aria-hidden="true">\u2605</span><button type="button" class="linkish nm" data-open="' + sp.id + '">' + esc(sp.name) + '</button><span class="tag t-sub">' + KIND[SS[sp.id].kind] + '</span>' + pfacts(sp) + '</li>';
       });
       g.items.forEach(function (it, k) { html += rowHtml(it, SP[it.id], k, g.items.length, P); });
       html += '</ul></section>';
@@ -554,7 +554,7 @@
     h += '<span class="rank" aria-hidden="true">' + (k + 1) + '</span>';
     h += '<select class="tier" data-tier="' + sp.id + '" aria-label="Tier for ' + nm + '"' + (it.t ? ' data-t="' + it.t + '"' : '') + '><option value="">\u2013</option>' + TIERS.map(function (t) { return '<option value="' + t + '"' + (it.t === t ? ' selected' : '') + ' title="' + TIER_NAME[t] + '">' + t + '</option>'; }).join('') + '</select>';
     h += '<span class="row-main"><button type="button" class="linkish nm" data-open="' + sp.id + '">' + nm + '</button>' + (sp.conc ? '<span class="tag t-conc" title="Concentration">C</span>' : '') + (sp.ritual ? '<span class="tag t-rit" title="Ritual">R</span>' : '') +
-      (tooHigh ? '<span class="small muted"> (later)</span>' : '') + '</span>';
+      (tooHigh ? '<span class="small muted"> (later)</span>' : '') + (it.t ? '<span class="ptier">' + it.t + '</span>' : '') + (it.p ? '<span class="ptier">Prepared</span>' : '') + '</span>' + pfacts(sp);
     if (P.book != null && sp.lvl > 0) h += '<label class="prep" title="Prepared today"><input type="checkbox" data-prep="' + sp.id + '"' + (it.p ? ' checked' : '') + '> P</label>';
     h += '<span class="row-btns">' +
       '<button type="button" class="mini-btn" data-mv="-1" data-id="' + sp.id + '" aria-label="Move ' + nm + ' up"' + (k === 0 ? ' disabled' : '') + '>\u25b2</button>' +
@@ -564,6 +564,12 @@
     if (editing[sp.id]) h += '<textarea class="rnote-edit" data-noteedit="' + sp.id + '" rows="2" maxlength="500" aria-label="Note for ' + nm + '" placeholder="Why this spell? When to use it?">' + esc(it.n) + '</textarea>';
     else if (it.n) h += '<p class="rnote">' + esc(it.n) + '</p>';
     return h + '</li>';
+  }
+  // facts line shown only on the printed spell sheet
+  function pfacts(sp) {
+    return '<span class="pfacts">' + esc([sp.time, sp.range, sp.comp + (sp.mcost ? ' (costly)' : ''), sp.dur].join(' \u00b7 ')) +
+      (sp.save ? esc(' \u00b7 ' + sp.save.join('/') + ' save') : '') + (sp.atk ? esc(' \u00b7 ' + sp.atk.toLowerCase() + ' attack') : '') +
+      ' \u00b7 ' + esc(DATA.books[sp.src].short + (sp.page ? ' p.' + sp.page : '')) + '</span>';
   }
   function levelItems(lv) { return L.items.filter(function (it) { var s = SP[it.id]; return s && s.lvl === lv; }); }
   function reorderLevel(lv, ids) {
@@ -713,6 +719,7 @@
         return;
       }
       else if (act === 'import') { $('#importFile').click(); return; }
+      else if (act === 'print') { window.print(); return; }
       editing = {}; saveLists(); renderAll();
     });
     $('#importFile').addEventListener('change', function () {
