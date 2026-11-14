@@ -36,6 +36,7 @@
   // A list holds up to 3 class rows (L.k): {cls, sub, opt, lvl, mod}. cls "_other" is a class without
   // spellcasting: it only adds to the character level.
   var OTHER = '_other', MAXROWS = 3;
+  var NONCAST = ['Barbarian', 'Fighter', 'Monk', 'Rogue'];   // classes offered as "no spells" rows
   function classes() { return DATA.classes[L.ed] || []; }
   function casterClasses() {
     return classes().filter(function (c) { return c.caster || c.subclasses.some(function (s) { return s.caster; }); });
@@ -50,7 +51,8 @@
   }
   function sumTo(arr, n) { var t = 0; for (var i = 0; i < n; i++) t += arr[i] || 0; return t; }
   function charLevel() { return L.k.reduce(function (t, r) { return t + r.lvl; }, 0); }
-  function rowLabel(r) { var c = clsRec(r), s = subRec(r); return !c ? 'Other class' : (s && !c.caster ? s.name : c.name); }
+  function rowLabel(r) { var c = clsRec(r), s = subRec(r); return !c ? (r.nm || 'Other class') : (s && !c.caster ? s.name : c.name); }
+  function capName(x) { return String(x).replace(/(^|[\s-])([a-z])/g, function (m, a, b) { return a + b.toUpperCase(); }); }
 
   function prog(row) {
     var c = clsRec(row), s = subRec(row), lv = row.lvl, i = lv - 1;
@@ -184,8 +186,12 @@
   }
   function cleanRow(r) {
     r = r || {};
-    return { cls: String(r.cls || 'wizard').slice(0, 40), sub: r.sub ? String(r.sub).slice(0, 60) : null, opt: r.opt ? String(r.opt).slice(0, 60) : null,
+    var cls = String(r.cls || 'wizard').slice(0, 40), nm = r.nm ? String(r.nm).slice(0, 40) : null;
+    if (cls.indexOf(OTHER + ':') === 0) { nm = cls.slice(OTHER.length + 1) || null; cls = OTHER; }
+    var out = { cls: cls, sub: r.sub ? String(r.sub).slice(0, 60) : null, opt: r.opt ? String(r.opt).slice(0, 60) : null,
       lvl: Math.min(20, Math.max(1, parseInt(r.lvl, 10) || 1)), mod: Math.min(10, Math.max(-5, parseInt(r.mod, 10) || 0)) };
+    if (cls === OTHER && nm) out.nm = nm;
+    return out;
   }
   function saveLists() { LS.cur = L.id; store.set('dm.lists', LS); }
   function loadLists() {
@@ -250,7 +256,7 @@
   function charOf(x) { return DC && x && x.ch ? DC.get(x.ch) : null; }
   // the character's classes as list rows (at most 3, non-casters folded into one "other" row)
   function charRows(ch) {
-    var keep = L, rows = [], other = 0;
+    var keep = L, rows = [], other = 0, names = [];
     L = { ed: ch.ed, k: [] };
     ch.classes.forEach(function (x) {
       var c = casterClasses().find(function (c) { return c.id === x.cls; });
@@ -264,12 +270,13 @@
         var src = row.sub && subRec(row) && subRec(row).caster ? subRec(row) : c;
         row.mod = Math.max(-5, Math.min(10, DC.mod(ch, src.ability || c.ability)));
       }
-      if (row && rows.length < MAXROWS - (other ? 1 : 0)) rows.push(row); else other += x.lvl;
+      if (row && rows.length < MAXROWS - (other ? 1 : 0)) rows.push(row);
+      else { other += x.lvl; if (names.indexOf(capName(x.cls)) < 0) names.push(capName(x.cls)); }
     });
     L = keep;
     if (rows.length && other) {
       if (rows.length === MAXROWS) rows.pop();
-      rows.push({ cls: OTHER, sub: null, opt: null, lvl: Math.min(other, 20), mod: 0 });
+      rows.push({ cls: OTHER, nm: names.join(' / '), sub: null, opt: null, lvl: Math.min(other, 20), mod: 0 });
     }
     return rows;
   }
@@ -329,6 +336,9 @@
     var name = prompt('Name for the new character:', L.name.replace(/'s spells$/, ''));
     if (name == null || !name.trim()) return;
     var ab = [10, 10, 10, 10, 10, 10], ix = { str: 0, dex: 1, con: 2, int: 3, wis: 4, cha: 5 };
+    var plain = L.k.filter(function (r) { return r.cls === OTHER && r.nm && /^[A-Za-z][A-Za-z -]*$/.test(r.nm); }).map(function (r) {
+      return { cls: r.nm.toLowerCase(), lvl: r.lvl, sub: null, subName: null };
+    });
     var cls = L.k.filter(function (r) { return r.cls !== OTHER; }).map(function (r) {
       var c = clsRec(r), s = subRec(r), src = s && s.caster ? s : c;
       if (c.preparedFormula && ix[c.ability] != null) ab[ix[c.ability]] = Math.max(ab[ix[c.ability]], 10 + 2 * r.mod);
@@ -336,7 +346,7 @@
     });
     quietChars = true;
     var ch = DC.save({ name: name.trim().slice(0, 60), ed: L.ed, ab: ab,
-      classes: cls.map(function (x) { return { cls: x.cls, lvl: x.lvl, sub: x.sub, subName: x.subName }; }), links: {} }, REPO);
+      classes: cls.map(function (x) { return { cls: x.cls, lvl: x.lvl, sub: x.sub, subName: x.subName }; }).concat(plain), links: {} }, REPO);
     L.ch = ch.id; L.chU = ch.updated;
     saveLists();
     DC.setLink(ch.id, REPO, { list: L.id });
@@ -346,7 +356,7 @@
     quietChars = false;
     renderAll();
     notice('Saved ' + ch.name + ' as a shared character. The other D&D Toolbox sites can use it now.' +
-      (L.k.some(function (r) { return r.cls === OTHER; }) ? ' Classes without spellcasting were left out; add them in the Multiclass Planner.' : ''));
+      (L.k.length > cls.length + plain.length ? ' Some levels without a class name were left out; add them in the Multiclass Planner.' : ''));
   }
   function charNote() {
     var ch = charOf(L);
@@ -368,7 +378,7 @@
     return new TextDecoder().decode(bytes);
   }
   function shareUrl() {
-    var c = { v: 2, n: L.name, e: L.ed, k: L.k.map(function (r) { return [r.cls, r.sub, r.opt, r.lvl, r.mod]; }),
+    var c = { v: 2, n: L.name, e: L.ed, k: L.k.map(function (r) { return [r.cls === OTHER && r.nm ? OTHER + ':' + r.nm : r.cls, r.sub, r.opt, r.lvl, r.mod]; }),
       i: L.items.map(function (it) {
         var r = [it.id, it.t, it.n, it.p ? 1 : 0, it.c || ''];
         while (r.length > 1 && !r[r.length - 1]) r.pop();
@@ -467,11 +477,14 @@
   function rowHtmlBuild(r, i) {
     var c = clsRec(r), multi = L.k.length > 1;
     if (c) r.cls = c.id;
-    var used = L.k.map(function (x, j) { return j === i ? null : x.cls; });
+    var used = L.k.map(function (x, j) { return j === i ? null : (x.cls === OTHER && x.nm ? x.nm.toLowerCase() : x.cls); });
     var opts = casterClasses().filter(function (x) { return used.indexOf(x.id) < 0; }).map(function (x) {
       var label = x.caster ? x.name : (x.subclasses.find(function (s) { return s.caster; }).name + ' (' + x.name + ')');
       return '<option value="' + esc(x.id) + '"' + (c && x.id === c.id ? ' selected' : '') + '>' + esc(label) + '</option>';
-    }).join('') + (i ? '<option value="' + OTHER + '"' + (!c ? ' selected' : '') + '>Other class (no spells)</option>' : '');
+    }).join('') + (i ? NONCAST.filter(function (n) { return used.indexOf(n.toLowerCase()) < 0; }).map(function (n) {
+      return '<option value="' + OTHER + ':' + n + '"' + (!c && r.nm === n ? ' selected' : '') + '>' + n + ' (no spells)</option>';
+    }).join('') + (!c && r.nm && NONCAST.indexOf(r.nm) < 0 ? '<option value="' + OTHER + ':' + esc(r.nm) + '" selected>' + esc(r.nm) + ' (no spells)</option>' : '') +
+      '<option value="' + OTHER + '"' + (!c && !r.nm ? ' selected' : '') + '>Other class (no spells)</option>' : '');
     var n = i + 1, h = '<div class="crow" data-row="' + i + '">';
     h += '<div class="ctl"><label class="ctl-label" for="cls' + i + '">' + (multi ? 'Class ' + n : 'Class') + '</label><select id="cls' + i + '" data-f="cls">' + opts + '</select></div>';
     if (c) {
@@ -575,7 +588,7 @@
           var sp = P.book != null ? P.count + ' prepared (' + P.book + '+ in book)' : P.kind ? P.count + ' ' + P.kind : '\u2013';
           return '<tr><th scope="row">' + esc(X.label) + ' ' + X.r.lvl + (X.s && X.c.caster ? ' <span class="small muted">' + esc(X.s.short || X.s.name) + '</span>' : '') + '</th><td>' + (P.cantrips || 0) + '</td><td>' + esc(sp) + '</td><td>' + (P.maxAny ? 'level ' + P.maxAny : 'none yet') + '</td></tr>';
         }).join('') + L.k.filter(function (r) { return r.cls === OTHER; }).map(function (r) {
-          return '<tr class="muted"><th scope="row">Other class ' + r.lvl + '</th><td colspan="3">no spellcasting</td></tr>';
+          return '<tr class="muted"><th scope="row">' + esc(rowLabel(r)) + ' ' + r.lvl + '</th><td colspan="3">no spellcasting</td></tr>';
         }).join('') + '</tbody></table>';
       $('#slots').innerHTML = C.max ? slotsHtml(C.slots) : '';
       if (C.casterLevel) notes.push('Spell slots come from the multiclass Spellcaster table at caster level ' + C.casterLevel + ': ' +
@@ -986,7 +999,11 @@
     rows.addEventListener('change', function (e) {
       var t = e.target, r = rowOf(t), f = t.dataset.f;
       if (!r || !f) return;
-      if (f === 'cls') { r.cls = t.value; r.sub = null; r.opt = null; shown = PAGE; }
+      if (f === 'cls') {
+        var v = t.value;
+        r.sub = null; r.opt = null; shown = PAGE; delete r.nm;
+        if (v.indexOf(OTHER + ':') === 0) { r.cls = OTHER; r.nm = v.slice(OTHER.length + 1); } else r.cls = v;
+      }
       else if (f === 'sub') { r.sub = t.value || null; r.opt = null; }
       else if (f === 'opt') r.opt = t.value;
       else if (f === 'lvl') r.lvl = +t.value;
