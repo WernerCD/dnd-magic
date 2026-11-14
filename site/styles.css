@@ -380,6 +380,24 @@ a.srctag:hover { text-decoration: underline; }
 .t-rit { color: hsl(140 50% var(--src-l)); border-color: hsl(140 50% var(--src-l) / .5); }
 .t-sub { color: var(--gold); border-color: var(--gold); }
 .t-opt, .t-old, .t-off { font-weight: 500; color: var(--muted); border-style: dashed; }
+.t-cls { font-weight: 500; color: var(--ink-2); }
+/* multiclass rows */
+.build-bar .controls-grid { align-items: flex-start; }
+.build-bar .seg { align-self: flex-start; }
+.class-rows { display: flex; flex-direction: column; gap: 10px; flex: 1 1 520px; min-width: 0; }
+.crow { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; }
+.class-rows .crow + .crow:not(.crow-add) { border-top: 1px dashed var(--line); padding-top: 10px; }
+.crow-add { align-items: center; gap: 12px; }
+.crow-rm { width: 36px; height: 36px; font-size: .9rem; }
+.mc { border-collapse: collapse; margin: 4px 0 10px; font-size: .9rem; }
+.mc th, .mc td { text-align: left; padding: 4px 14px 4px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; }
+.mc thead th { font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.mc tbody th { font-weight: 600; }
+#mcTable { overflow-x: auto; }
+#mcTable:empty { display: none; }
+.mlabel { font-size: .72rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); align-self: center; }
+.msep { flex-basis: 100%; height: 0; }
+.rcls { min-height: 30px; padding: 2px 6px; font-size: .8rem; max-width: 170px; border-radius: 6px; }
 .cfacts { display: grid; grid-template-columns: max-content 1fr; gap: 1px 10px; }
 .cfacts dt { color: var(--muted); }
 .cfacts dd { margin: 0; color: var(--ink); }
@@ -406,7 +424,8 @@ a.srctag:hover { text-decoration: underline; }
   .ctl-lists { margin-left: 0; flex-basis: 100%; }
   .ctl-lists select { flex: 1; max-width: none; }
   .ctl select { max-width: none; }
-  .controls-grid > .ctl:not(.ctl-level):not(.ctl-wis) { flex: 1 1 140px; }
+  .controls-grid > .ctl:not(.ctl-level):not(.ctl-wis), .crow > .ctl:not(.ctl-level):not(.ctl-wis) { flex: 1 1 140px; }
+  .class-rows { flex-basis: 100%; }
   .ctl select { width: 100%; }
   .rnote, .rnote-edit { margin-left: 0; max-width: 100%; }
   .spell-filters select { flex: 1 1 140px; }
@@ -414,7 +433,7 @@ a.srctag:hover { text-decoration: underline; }
 .pfacts, .ptier { display: none; }
 .row .nm, .card .nm, .linkish { min-height: 24px; }
 @media print {
-  .build-bar, .tabs, .browse, .about, #notice, .mine-help, .handle, .row-btns, .tier, .prep, .rnote-edit, #rulesNotes { display: none !important; }
+  .build-bar, .tabs, .browse, .about, #notice, .mine-help, .handle, .row-btns, .tier, .prep, .rcls, .rnote-edit, #rulesNotes { display: none !important; }
   .layout { display: block; }
   .mine, body.show-mine .mine { display: block !important; position: static; }
   .mine-inner { max-height: none; overflow: visible; border: 0; box-shadow: none; padding: 0; }

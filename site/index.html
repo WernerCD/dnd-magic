@@ -53,26 +53,7 @@
         <button type="button" role="radio" data-ed="2024">2024</button>
       </div>
     </div>
-    <div class="ctl">
-      <label class="ctl-label" for="cls">Class</label>
-      <select id="cls"></select>
-    </div>
-    <div class="ctl">
-      <label class="ctl-label" for="sub" id="subLabel">Subclass</label>
-      <select id="sub"></select>
-    </div>
-    <div class="ctl" id="optWrap" hidden>
-      <label class="ctl-label" for="opt" id="optLabel">Option</label>
-      <select id="opt"></select>
-    </div>
-    <div class="ctl ctl-level">
-      <label class="ctl-label" for="lvl">Level <output id="lvlOut" for="lvl">1</output></label>
-      <input type="range" id="lvl" min="1" max="20" value="1">
-    </div>
-    <div class="ctl ctl-wis" id="modWrap" hidden>
-      <label class="ctl-label" for="mod" id="modLabel">Ability mod</label>
-      <input type="number" id="mod" min="-5" max="10" value="3" inputmode="numeric">
-    </div>
+    <div class="class-rows" id="classRows"></div>
     <div class="ctl ctl-lists">
       <label class="ctl-label" for="listSel">My lists</label>
       <div class="profile-row">
@@ -104,6 +85,7 @@
   <section class="rules-card" id="rulesCard" aria-labelledby="rulesTitle">
     <div class="rules-top"><h2 id="rulesTitle">Spellcasting</h2><span class="muted" id="rulesSub"></span></div>
     <div class="stats" id="stats"></div>
+    <div id="mcTable"></div>
     <div class="slots" id="slots"></div>
     <ul id="rulesNotes"></ul>
   </section>
@@ -121,6 +103,7 @@
           <button type="button" role="radio" data-scope="class" title="Spells on this class and subclass list">Class list</button>
           <button type="button" role="radio" data-scope="all" title="Every spell for these rules (for feats, Magical Secrets and the like)">All spells</button>
         </div>
+        <select id="onlyCls" aria-label="Which class list" hidden></select>
         <div class="chips" id="lvlChips" role="group" aria-label="Spell level"></div>
         <details class="srcpick fpick" id="schPick">
           <summary id="schSum">School</summary>

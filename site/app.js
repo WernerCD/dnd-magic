@@ -25,7 +25,7 @@
   var shown = PAGE, editing = {}, lastRows = [];
 
   function defaults() {
-    return { q: '', lv: [], sch: [], time: '', conc: '', rit: '', dmg: '', save: '', books: null, scope: 'class',
+    return { q: '', lv: [], sch: [], time: '', conc: '', rit: '', dmg: '', save: '', books: null, scope: 'class', only: '',
       castable: false, hidePicked: false, opt: true, view: store.get('dm.view', 'stats'), sort: 'level' };
   }
   function lvName(n) { return n === 0 ? 'Cantrip' : 'Level ' + n; }
@@ -33,22 +33,27 @@
   function uid() { return Math.random().toString(36).slice(2, 10); }
 
   // ------------------------------------------------------------ class model
+  // A list holds up to 3 class rows (L.k): {cls, sub, opt, lvl, mod}. cls "_other" is a class without
+  // spellcasting: it only adds to the character level.
+  var OTHER = '_other', MAXROWS = 3;
   function classes() { return DATA.classes[L.ed] || []; }
   function casterClasses() {
     return classes().filter(function (c) { return c.caster || c.subclasses.some(function (s) { return s.caster; }); });
   }
-  function clsRec() { return classes().find(function (c) { return c.id === L.cls; }) || casterClasses()[0]; }
-  function subs() { var c = clsRec(); return c.caster ? c.subclasses : c.subclasses.filter(function (s) { return s.caster; }); }
-  function subRec() { var s = subs(); return s.find(function (x) { return x.id === L.sub; }) || (clsRec().caster ? null : s[0]); }
-  function optRec() {
-    var s = subRec();
+  function clsRec(r) { return r.cls === OTHER ? null : (classes().find(function (c) { return c.id === r.cls; }) || casterClasses()[0]); }
+  function subs(r) { var c = clsRec(r); if (!c) return []; return c.caster ? c.subclasses : c.subclasses.filter(function (s) { return s.caster; }); }
+  function subRec(r) { var c = clsRec(r); if (!c) return null; var s = subs(r); return s.find(function (x) { return x.id === r.sub; }) || (c.caster ? null : s[0]); }
+  function optRec(r) {
+    var s = subRec(r);
     if (!s || !s.options.length) return null;
-    return s.options.find(function (o) { return o.name === L.opt; }) || s.options[0];
+    return s.options.find(function (o) { return o.name === r.opt; }) || s.options[0];
   }
   function sumTo(arr, n) { var t = 0; for (var i = 0; i < n; i++) t += arr[i] || 0; return t; }
+  function charLevel() { return L.k.reduce(function (t, r) { return t + r.lvl; }, 0); }
+  function rowLabel(r) { var c = clsRec(r), s = subRec(r); return !c ? 'Other class' : (s && !c.caster ? s.name : c.name); }
 
-  function prog() {
-    var c = clsRec(), s = subRec(), lv = L.lvl, i = lv - 1;
+  function prog(row) {
+    var c = clsRec(row), s = subRec(row), lv = row.lvl, i = lv - 1;
     var src = s && s.caster ? s : c;
     var r = { ability: src.ability, caster: src.caster, cantrips: src.cantrips ? src.cantrips[i] : 0, slots: [0, 0, 0, 0, 0, 0, 0, 0, 0], max: 0 };
     if (src.slots) src.slots[i].forEach(function (n, k) { r.slots[k] = n; });
@@ -64,37 +69,68 @@
     else if (c.preparedFormula) {
       var half = /\/\s*2/.test(c.preparedFormula);
       r.kind = 'prepared'; r.formula = half ? 'half' : 'full';
-      r.count = r.max ? Math.max(1, (half ? Math.floor(lv / 2) : lv) + (L.mod | 0)) : 0;
+      r.count = r.max ? Math.max(1, (half ? Math.floor(lv / 2) : lv) + (row.mod | 0)) : 0;
     }
     if (c.spellbook && !(s && s.caster)) r.book = sumTo(c.spellbook, lv);
     r.listClass = c.caster ? c.name : 'Wizard';
     return r;
   }
-  // lowest class level at which a spell level can be cast
-  function minLevelFor(sl) {
+  // lowest class level at which a spell level can be cast by this class alone
+  function minLevelFor(sl, row) {
     if (sl === 0) return 1;
-    var keep = L.lvl, out = null;
+    var out = null;
     for (var lv = 1; lv <= 20 && out == null; lv++) {
-      L.lvl = lv;
-      var p = prog();
+      var p = prog({ cls: row.cls, sub: row.sub, opt: row.opt, lvl: lv, mod: row.mod });
       if (p.maxAny >= sl) out = lv;
     }
-    L.lvl = keep;
     return out;
   }
 
   // which spells come from the subclass: id -> {kind, at, bySpellLevel}
-  function subSpells() {
-    var o = optRec(), m = {};
+  function subSpells(row) {
+    var o = optRec(row), m = {};
     if (!o) return m;
     o.spells.forEach(function (x) { if (!m[x.id]) m[x.id] = x; });
     return m;
   }
-  function unlocked(x, sp, P) { return x.bySpellLevel ? sp.lvl <= P.maxAny : x.at <= L.lvl; }
-  function extraLists() {
-    var o = optRec(), out = [];
+  function unlocked(x, sp, X) { return x.bySpellLevel ? sp.lvl <= X.P.maxAny : x.at <= X.r.lvl; }
+  function extraLists(row) {
+    var o = optRec(row), out = [];
     if (o) o.notes.forEach(function (n) { if (n.allOf && out.indexOf(n.allOf) < 0) out.push(n.allOf); });
     return out;
+  }
+
+  // the spellcasting classes of the current list, each with its own progression and subclass spells
+  function contexts() {
+    return L.k.filter(function (r) { return r.cls !== OTHER; }).map(function (r) {
+      var c = clsRec(r), P = prog(r);
+      return { r: r, key: c.id, c: c, s: subRec(r), o: optRec(r), P: P, SS: subSpells(r), names: [P.listClass].concat(extraLists(r)), label: rowLabel(r) };
+    });
+  }
+  // shared spell slots. One class with Spellcasting uses its own table; two or more add up a caster level
+  // (full casters count fully, Paladin/Ranger half, Artificer half rounded up, EK/AT a third) and use the
+  // multiclass table. Pact Magic stays separate.
+  function combine(X) {
+    var full = (classes().find(function (c) { return c.id === 'wizard'; }) || {}).slots;
+    var r = { slots: [0, 0, 0, 0, 0, 0, 0, 0, 0], max: 0, pact: null, arcanum: null, casterLevel: null };
+    var sc = X.filter(function (x) { return !x.P.pact && x.P.max > 0; });
+    if (sc.length === 1) r.slots = sc[0].P.slots.slice();
+    else if (sc.length > 1) {
+      var cl = 0;
+      sc.forEach(function (x) {
+        var t = x.P.caster, l = x.r.lvl;
+        x.contrib = t === 'full' ? l : t === '1/2' ? Math.floor(l / 2) : t === 'artificer' ? Math.ceil(l / 2) : t === '1/3' ? Math.floor(l / 3) : 0;
+        cl += x.contrib;
+      });
+      r.casterLevel = Math.min(20, cl);
+      r.parts = sc;
+      if (r.casterLevel > 0 && full) r.slots = full[r.casterLevel - 1].slice();
+    }
+    r.slots.forEach(function (n, k) { if (n > 0) r.max = k + 1; });
+    X.forEach(function (x) { if (x.P.pact) { r.pact = x.P.pact; r.arcanum = x.P.arcanum; r.pactBy = x; } });
+    r.maxAny = Math.max(r.max, r.pact ? r.pact.lvl : 0, r.arcanum && r.arcanum.length ? r.arcanum[r.arcanum.length - 1] : 0);
+    r.cantrips = X.some(function (x) { return x.P.cantrips; });
+    return r;
   }
 
   // ------------------------------------------------------------ spell pool
@@ -104,9 +140,9 @@
       return s.ed === '2024' || (s.legacy && F.opt);
     });
   }
-  function membership(s, P, SS, names) {
-    var v = null, lists = s.lists[L.ed] || {};
-    if (SS[s.id]) return { on: true, sub: SS[s.id] };
+  function member1(s, X) {
+    var v = null, lists = s.lists[L.ed] || {}, names = X.names;
+    if (X.SS[s.id]) return { on: true, sub: X.SS[s.id] };
     for (var k = 0; k < names.length; k++) {
       var x = lists[names[k]];
       if (x === 1) return { on: true };
@@ -115,11 +151,41 @@
     if (v === 'tce' && F.opt) return { on: true, tce: true };
     return { on: false, tce: v === 'tce' };
   }
+  // {on, by: [contexts that have it], sub, subBy, tce}
+  function membership(s) {
+    var res = { on: false, by: [], sub: null, tce: false }, plain = false, tce = false;
+    CTX.forEach(function (X) {
+      var m = member1(s, X);
+      if (m.sub && !res.sub) { res.sub = m.sub; res.subBy = X; }
+      if (m.on) { res.on = true; res.by.push(X); if (m.tce) tce = true; else plain = true; }
+      else if (m.tce) tce = true;
+    });
+    res.tce = tce && !plain;
+    return res;
+  }
+  // the highest spell level this spell could be learned at: by a class that has it, else by any class
+  function learnMax(m) {
+    var X = m.by.length ? m.by : CTX;
+    return X.reduce(function (t, x) { return Math.max(t, x.P.maxAny); }, 0);
+  }
+  function hasCantrips(m) { return (m.by.length ? m.by : CTX).some(function (x) { return x.P.cantrips; }); }
+  // which class a spell on the list counts against (null = "other", not counted)
+  function assigned(it, sp) {
+    if (it.c === '-') return null;
+    if (it.c) { var f = CTX.find(function (x) { return x.key === it.c; }); if (f) return f; }
+    var m = membership(sp);
+    return m.by.find(function (x) { return sp.lvl === 0 ? x.P.cantrips : x.P.maxAny >= sp.lvl; }) || m.by[0] || null;
+  }
 
   // ------------------------------------------------------------ lists
   function newList(name) {
-    var base = L || { ed: '2024', cls: 'wizard', sub: null, opt: null, lvl: 5, mod: 3 };
-    return { id: uid(), name: name || 'My spells', ed: base.ed, cls: base.cls, sub: base.sub, opt: base.opt, lvl: base.lvl, mod: base.mod, items: [] };
+    var ed = L ? L.ed : '2024', k = L ? JSON.parse(JSON.stringify(L.k)) : [{ cls: 'wizard', sub: null, opt: null, lvl: 5, mod: 3 }];
+    return { id: uid(), name: name || 'My spells', ed: ed, k: k, items: [] };
+  }
+  function cleanRow(r) {
+    r = r || {};
+    return { cls: String(r.cls || 'wizard').slice(0, 40), sub: r.sub ? String(r.sub).slice(0, 60) : null, opt: r.opt ? String(r.opt).slice(0, 60) : null,
+      lvl: Math.min(20, Math.max(1, parseInt(r.lvl, 10) || 1)), mod: Math.min(10, Math.max(-5, parseInt(r.mod, 10) || 0)) };
   }
   function saveLists() { LS.cur = L.id; store.set('dm.lists', LS); }
   function loadLists() {
@@ -133,15 +199,26 @@
   function clean(x) {
     if (!x || typeof x !== 'object') return null;
     var items = Array.isArray(x.items) ? x.items : [];
+    // lists saved before multiclassing kept one class at the top level
+    var k = (Array.isArray(x.k) && x.k.length ? x.k : [x]).slice(0, MAXROWS).map(cleanRow);
+    var seen = {}, tot = 0;
+    k = k.filter(function (r, i) {
+      if (i && r.cls !== OTHER && seen[r.cls]) return false;
+      seen[r.cls] = 1;
+      if (tot + r.lvl > 20) r.lvl = 20 - tot;
+      tot += r.lvl;
+      return r.lvl >= 1 && !(i === 0 && r.cls === OTHER);
+    });
+    if (!k.length) k = [cleanRow({})];
     return {
       id: typeof x.id === 'string' && x.id ? x.id.slice(0, 20) : uid(),
       name: String(x.name || 'Imported list').slice(0, 60),
       ed: x.ed === '2014' ? '2014' : '2024',
-      cls: String(x.cls || 'wizard').slice(0, 40), sub: x.sub ? String(x.sub).slice(0, 60) : null,
-      opt: x.opt ? String(x.opt).slice(0, 60) : null,
-      lvl: Math.min(20, Math.max(1, parseInt(x.lvl, 10) || 1)), mod: Math.min(10, Math.max(-5, parseInt(x.mod, 10) || 0)),
+      k: k,
       items: items.filter(function (it) { return it && typeof it.id === 'string'; }).slice(0, 400).map(function (it) {
-        return { id: it.id.slice(0, 80), t: TIERS.indexOf(it.t) >= 0 ? it.t : '', n: String(it.n || '').slice(0, 500), p: !!it.p };
+        var o = { id: it.id.slice(0, 80), t: TIERS.indexOf(it.t) >= 0 ? it.t : '', n: String(it.n || '').slice(0, 500), p: !!it.p };
+        if (it.c) o.c = String(it.c).slice(0, 40);
+        return o;
       })
     };
   }
@@ -175,8 +252,12 @@
     return new TextDecoder().decode(bytes);
   }
   function shareUrl() {
-    var c = { v: 1, n: L.name, e: L.ed, c: L.cls, s: L.sub, o: L.opt, l: L.lvl, m: L.mod,
-      i: L.items.map(function (it) { var r = [it.id]; if (it.t || it.n || it.p) r.push(it.t); if (it.n || it.p) r.push(it.n); if (it.p) r.push(1); return r; }) };
+    var c = { v: 2, n: L.name, e: L.ed, k: L.k.map(function (r) { return [r.cls, r.sub, r.opt, r.lvl, r.mod]; }),
+      i: L.items.map(function (it) {
+        var r = [it.id, it.t, it.n, it.p ? 1 : 0, it.c || ''];
+        while (r.length > 1 && !r[r.length - 1]) r.pop();
+        return r;
+      }) };
     return location.origin + location.pathname + '#list=' + b64e(JSON.stringify(c));
   }
   function readShare() {
@@ -185,11 +266,13 @@
     history.replaceState(null, '', location.pathname + location.search);
     try {
       var c = JSON.parse(b64d(m[1]));
-      var x = clean({ name: c.n, ed: c.e, cls: c.c, sub: c.s, opt: c.o, lvl: c.l, mod: c.m,
-        items: (c.i || []).map(function (r) { return { id: r[0], t: r[1], n: r[2], p: r[3] }; }) });
+      var k = Array.isArray(c.k) ? c.k.map(function (r) { return { cls: r[0], sub: r[1], opt: r[2], lvl: r[3], mod: r[4] }; })
+        : [{ cls: c.c, sub: c.s, opt: c.o, lvl: c.l, mod: c.m }];
+      var x = clean({ name: c.n, ed: c.e, k: k,
+        items: (c.i || []).map(function (r) { return { id: r[0], t: r[1], n: r[2], p: r[3], c: r[4] }; }) });
       x.id = uid();
-      var sig = JSON.stringify([x.ed, x.cls, x.sub, x.items]);
-      var same = LS.lists.find(function (y) { return JSON.stringify([y.ed, y.cls, y.sub, y.items]) === sig; });
+      var sig = JSON.stringify([x.ed, x.k, x.items]);
+      var same = LS.lists.find(function (y) { return JSON.stringify([y.ed, y.k, y.items]) === sig; });
       if (same) { L = same; notice('That shared list is already saved as "' + same.name + '".'); }
       else {
         x.name = x.name + ' (shared)';
@@ -237,6 +320,7 @@
     ['time', 'conc', 'rit', 'dmg', 'save', 'sort'].forEach(function (k) { if (p.get(k)) F[k] = p.get(k); });
     if (p.get('books')) F.books = p.get('books') === 'all' ? null : p.get('books').split(',');
     if (p.get('scope') === 'all') F.scope = 'all';
+    if (p.get('only')) F.only = p.get('only');
     if (p.get('view')) F.view = ['basic', 'stats', 'full'].indexOf(p.get('view')) >= 0 ? p.get('view') : F.view;
     if (p.get('castable') === '1') F.castable = true;
     if (p.get('hide') === '1') F.hidePicked = true;
@@ -252,6 +336,7 @@
     if (F.sort !== 'level') p.set('sort', F.sort);
     if (F.books) p.set('books', F.books.join(','));
     if (F.scope === 'all') p.set('scope', 'all');
+    else if (F.only) p.set('only', F.only);
     if (F.view !== 'stats') p.set('view', F.view);
     if (F.castable) p.set('castable', '1');
     if (F.hidePicked) p.set('hide', '1');
@@ -263,92 +348,142 @@
   }
 
   // ------------------------------------------------------------ build controls
+  function rowHtmlBuild(r, i) {
+    var c = clsRec(r), multi = L.k.length > 1;
+    if (c) r.cls = c.id;
+    var used = L.k.map(function (x, j) { return j === i ? null : x.cls; });
+    var opts = casterClasses().filter(function (x) { return used.indexOf(x.id) < 0; }).map(function (x) {
+      var label = x.caster ? x.name : (x.subclasses.find(function (s) { return s.caster; }).name + ' (' + x.name + ')');
+      return '<option value="' + esc(x.id) + '"' + (c && x.id === c.id ? ' selected' : '') + '>' + esc(label) + '</option>';
+    }).join('') + (i ? '<option value="' + OTHER + '"' + (!c ? ' selected' : '') + '>Other class (no spells)</option>' : '');
+    var n = i + 1, h = '<div class="crow" data-row="' + i + '">';
+    h += '<div class="ctl"><label class="ctl-label" for="cls' + i + '">' + (multi ? 'Class ' + n : 'Class') + '</label><select id="cls' + i + '" data-f="cls">' + opts + '</select></div>';
+    if (c) {
+      var ss = subs(r), s = subRec(r);
+      r.sub = s ? s.id : null;
+      var lab = function (x) { return x.name + (x.legacy ? ' (' + DATA.books[x.src].short + ')' : ''); };
+      var o1 = function (x) { return '<option value="' + esc(x.id) + '"' + (s && x.id === s.id ? ' selected' : '') + '>' + esc(lab(x)) + '</option>'; };
+      var native = ss.filter(function (x) { return !x.legacy; }), old = ss.filter(function (x) { return x.legacy; });
+      h += '<div class="ctl"><label class="ctl-label" for="sub' + i + '">' + esc(c.subclassTitle || 'Subclass') + '</label><select id="sub' + i + '" data-f="sub">' +
+        (c.caster ? '<option value="">None yet / not chosen</option>' : '') + native.map(o1).join('') +
+        (old.length ? '<optgroup label="From older books">' + old.map(o1).join('') + '</optgroup>' : '') + '</select></div>';
+      var named = s ? s.options.filter(function (o) { return o.name; }) : [];
+      if (named.length >= 2) {
+        var o = optRec(r);
+        r.opt = o.name;
+        h += '<div class="ctl"><label class="ctl-label" for="opt' + i + '">' + (/Land/.test(s.name) ? 'Land' : /Genie/.test(s.name) ? 'Genie kind' : /Divine Soul/.test(s.name) ? 'Affinity' : 'Option') + '</label><select id="opt' + i + '" data-f="opt">' +
+          named.map(function (x) { return '<option' + (x.name === o.name ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('') + '</select></div>';
+      } else r.opt = null;
+    } else { r.sub = null; r.opt = null; }
+    var room = 20 - (charLevel() - r.lvl);
+    h += '<div class="ctl ctl-level"><label class="ctl-label" for="lvl' + i + '">' + (multi ? esc(rowLabel(r)) + ' level' : 'Level') + ' <output for="lvl' + i + '">' + r.lvl + '</output></label>' +
+      '<input type="range" id="lvl' + i + '" data-f="lvl" min="1" max="' + room + '" value="' + r.lvl + '"' + (room <= 1 ? ' disabled' : '') + '></div>';
+    if (c && c.preparedFormula && !(subRec(r) && subRec(r).caster)) {
+      h += '<div class="ctl ctl-wis"><label class="ctl-label" for="mod' + i + '">' + (ABIL[c.ability] || 'Ability').slice(0, 3).toUpperCase() + ' modifier</label><input type="number" id="mod' + i + '" data-f="mod" min="-5" max="10" value="' + r.mod + '" inputmode="numeric"></div>';
+    }
+    if (multi) h += '<button type="button" class="icon-btn crow-rm" data-rmrow="' + i + '" aria-label="Remove ' + esc(rowLabel(r)) + ' from this character" title="Remove this class">\u2715</button>';
+    return h + '</div>';
+  }
   function renderBuild() {
     $$('[data-ed]').forEach(function (b) { b.setAttribute('aria-checked', String(b.dataset.ed === L.ed)); });
-    var c = clsRec();
-    L.cls = c.id;
-    $('#cls').innerHTML = casterClasses().map(function (x) {
-      var label = x.caster ? x.name : (x.subclasses.find(function (s) { return s.caster; }).name + ' (' + x.name + ')');
-      return '<option value="' + esc(x.id) + '"' + (x.id === c.id ? ' selected' : '') + '>' + esc(label) + '</option>';
-    }).join('');
-    var ss = subs(), s = subRec();
-    L.sub = s ? s.id : null;
-    $('#subLabel').textContent = c.subclassTitle || 'Subclass';
-    var lab = function (x) { return x.name + (x.legacy ? ' (' + DATA.books[x.src].short + ')' : ''); };
-    var native = ss.filter(function (x) { return !x.legacy; }), old = ss.filter(function (x) { return x.legacy; });
-    $('#sub').innerHTML = (c.caster ? '<option value="">None yet / not chosen</option>' : '') +
-      native.map(function (x) { return '<option value="' + esc(x.id) + '"' + (s && x.id === s.id ? ' selected' : '') + '>' + esc(lab(x)) + '</option>'; }).join('') +
-      (old.length ? '<optgroup label="From older books">' + old.map(function (x) { return '<option value="' + esc(x.id) + '"' + (s && x.id === s.id ? ' selected' : '') + '>' + esc(lab(x)) + '</option>'; }).join('') + '</optgroup>' : '');
-    var named = s ? s.options.filter(function (o) { return o.name; }) : [];
-    $('#optWrap').hidden = named.length < 2;
-    if (named.length >= 2) {
-      var o = optRec();
-      L.opt = o.name;
-      $('#optLabel').textContent = /Land/.test(s.name) ? 'Land' : /Genie/.test(s.name) ? 'Genie kind' : /Divine Soul/.test(s.name) ? 'Affinity' : 'Option';
-      $('#opt').innerHTML = named.map(function (x) { return '<option' + (x.name === o.name ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('');
-    } else L.opt = null;
-    $('#lvl').value = L.lvl; $('#lvlOut').textContent = L.lvl;
-    $('#mod').value = L.mod;
-    $('#modWrap').hidden = !clsRec().preparedFormula || !!(s && s.caster);
-    $('#modLabel').textContent = (ABIL[clsRec().ability] || 'Ability').slice(0, 3).toUpperCase() + ' modifier';
+    var h = L.k.map(rowHtmlBuild).join('');
+    var free = 20 - charLevel();
+    if (L.k.length < MAXROWS) h += '<div class="crow crow-add"><button type="button" class="btn" id="addCls"' + (free < 1 ? ' disabled title="Your character is already level 20"' : '') + '>+ Add a class (multiclass)</button>' +
+      (L.k.length > 1 ? '<span class="small muted">Character level ' + charLevel() + '</span>' : '') + '</div>';
+    else h += '<div class="crow crow-add"><span class="small muted">Character level ' + charLevel() + ' (3 classes at most here)</span></div>';
+    $('#classRows').innerHTML = h;
     $('#listSel').innerHTML = LS.lists.map(function (x) { return '<option value="' + esc(x.id) + '"' + (x.id === L.id ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('');
     $('#optTogText').textContent = L.ed === '2014' ? "Tasha's optional class spells" : 'Spells from older books';
     $('#optTogWrap').title = L.ed === '2014' ? "Include the optional class spells Tasha's Cauldron of Everything adds to each list" : 'Include spells from 2014-era books that the 2024 Player\'s Handbook did not reprint';
     $('#optTog').checked = F.opt;
   }
 
-  function renderRules() {
-    var P = prog(), c = clsRec(), s = subRec();
-    $('#rulesTitle').textContent = (s && !c.caster ? s.name : c.name) + ', level ' + L.lvl;
-    var bk = DATA.books[c.src];
-    $('#rulesSub').innerHTML = (s ? esc(s.name) + ' &middot; ' : '') + esc(L.ed) + ' rules &middot; ' + esc(ABIL[P.ability] || '') + ' spellcasting';
-    var st = [];
-    st.push(['Cantrips', P.cantrips || 0]);
-    if (P.kind) st.push([P.kind === 'known' ? 'Spells known' : 'Prepared spells', P.count]);
-    if (P.book != null) st.push(['Spellbook (minimum)', P.book]);
-    st.push(['Highest spell level', P.maxAny ? (P.arcanum && P.arcanum.length ? P.max + ' (+' + P.arcanum.join(', ') + ')' : P.max) : 'none yet']);
-    if (P.pact) st.push(['Pact slots', P.pact.n + ' \u00d7 level ' + P.pact.lvl]);
-    var C = counts(P);
-    $('#stats').innerHTML = st.map(function (x) { return '<div class="stat"><b>' + esc(x[1]) + '</b><span>' + esc(x[0]) + '</span></div>'; }).join('');
-    if (P.pact) $('#slots').innerHTML = '';
-    else $('#slots').innerHTML = '<span class="ctl-label">Spell slots</span>' + P.slots.map(function (n, k) {
-      return '<span class="slot' + (n ? '' : ' none') + '" title="' + n + ' level ' + (k + 1) + ' slot' + (n === 1 ? '' : 's') + '"><i>' + (k + 1) + '</i><b>' + (n || '\u2013') + '</b></span>';
-    }).join('');
-    var notes = [];
+  function classNotes(X, multi) {
+    var notes = [], P = X.P, c = X.c, s = X.s, lv = X.r.lvl;
     if (!P.maxAny && !P.cantrips) {
-      var first = minLevelFor(1);
-      notes.push('No spellcasting yet' + (first ? ': it starts at level ' + first + '.' : '.'));
+      var first = minLevelFor(1, X.r);
+      notes.push('No spellcasting yet' + (first ? ': it starts at ' + (multi ? esc(X.label) + ' ' : '') + 'level ' + first + '.' : '.'));
     }
     if (P.formula) notes.push('Prepared spells = ' + (P.formula === 'half' ? 'half your ' + c.name + ' level (rounded down)' : 'your ' + c.name + ' level') + ' + your ' + (ABIL[c.ability] || '') + ' modifier (minimum 1). Set the modifier above.');
-    if (P.book != null) notes.push('Your spellbook starts with 6 level 1 spells and gains 2 each level; you can also copy spells you find. Mark the spells you have prepared with the <b>P</b> box in your list.');
-    if (P.pact) notes.push('Pact Magic: all your slots are level ' + P.pact.lvl + ' and come back on a short rest.');
+    if (P.book != null) notes.push('Your spellbook starts with 6 level 1 spells and gains 2 each ' + (multi ? 'Wizard ' : '') + 'level; you can also copy spells you find. Mark the spells you have prepared with the <b>P</b> box in your list.');
+    if (P.pact) notes.push('Pact Magic: all your Pact slots are level ' + P.pact.lvl + ' and come back on a short rest.' + (multi ? ' You can cast your other classes\' spells with them, and your Warlock spells with your other slots.' : ''));
     if (P.arcanum && P.arcanum.length) notes.push('Mystic Arcanum: one spell each of level ' + P.arcanum.join(', ') + ', cast once per long rest without a slot. They do not count against your prepared or known spells.');
     if (L.ed === '2014' && s && s.caster) notes.push(s.name === 'Eldritch Knight' ? 'Most of your spells must be abjuration or evocation; the spells you learn at levels 3, 8, 14 and 20 can be from any school.' : 'Most of your spells must be enchantment or illusion; the spells you learn at levels 3, 8, 14 and 20 can be from any school.');
-    var o = optRec();
-    if (o) o.notes.forEach(function (n) {
-      if (n.allOf && notes.join().indexOf(n.allOf + ' spell list') < 0) notes.push('Your subclass adds the whole ' + esc(n.allOf) + ' spell list to yours (shown in Class list).');
-      if (n.choose && n.at <= L.lvl) notes.push('At level ' + n.at + ' your subclass also lets you pick ' + (n.count > 1 ? n.count + ' extra spells' : 'an extra spell') + ' (see the book for which).');
+    if (X.o) X.o.notes.forEach(function (n) {
+      if (n.allOf) notes.push('Your subclass adds the whole ' + esc(n.allOf) + ' spell list to yours (shown in Class list).');
+      if (n.choose && n.at <= lv) notes.push('At level ' + n.at + ' your subclass also lets you pick ' + (n.count > 1 ? n.count + ' extra spells' : 'an extra spell') + ' (see the book for which).');
     });
     if (s && s.legacy) notes.push('This subclass is from ' + esc(DATA.books[s.src].name) + ', written for the 2014 rules. The 2024 rules allow older subclasses if your DM agrees.');
     if (s && !s.srd) notes.push('Subclass from ' + esc(DATA.books[s.src].name) + (s.page ? ' p.' + s.page : '') + ': only its spell list is shown here.');
-    var SS = subSpells(), nSub = Object.keys(SS).filter(function (id) { return SP[id] && unlocked(SS[id], SP[id], P) && SS[id].kind !== 'expanded'; }).length;
+    var nSub = Object.keys(X.SS).filter(function (id) { return SP[id] && unlocked(X.SS[id], SP[id], X) && X.SS[id].kind !== 'expanded'; }).length;
     if (nSub) notes.push(nSub + ' subclass spell' + (nSub === 1 ? ' is' : 's are') + ' always on hand at this level and do' + (nSub === 1 ? 'es' : '') + ' not count against your ' + (P.kind || 'spell') + ' total.');
+    var pre = multi ? '<b>' + esc(X.label) + ':</b> ' : '';
+    return notes.map(function (n) { return pre + n; });
+  }
+  function slotsHtml(slots) {
+    return '<span class="ctl-label">Spell slots</span>' + slots.map(function (n, k) {
+      return '<span class="slot' + (n ? '' : ' none') + '" title="' + n + ' level ' + (k + 1) + ' slot' + (n === 1 ? '' : 's') + '"><i>' + (k + 1) + '</i><b>' + (n || '\u2013') + '</b></span>';
+    }).join('');
+  }
+  var CONTRIB = { full: 'full level', '1/2': 'half, rounded down', artificer: 'half, rounded up', '1/3': 'a third, rounded down' };
+  function renderRules() {
+    var C = COMBO, multi = L.k.length > 1, st = [], notes = [];
+    var statHtml = function () { return st.map(function (x) { return '<div class="stat"><b>' + esc(x[1]) + '</b><span>' + esc(x[0]) + '</span></div>'; }).join(''); };
+    if (!multi) {
+      var X = CTX[0], P = X.P;
+      $('#rulesTitle').textContent = X.label + ', level ' + X.r.lvl;
+      $('#rulesSub').innerHTML = (X.s ? esc(X.s.name) + ' &middot; ' : '') + esc(L.ed) + ' rules &middot; ' + esc(ABIL[P.ability] || '') + ' spellcasting';
+      st.push(['Cantrips', P.cantrips || 0]);
+      if (P.kind) st.push([P.kind === 'known' ? 'Spells known' : 'Prepared spells', P.count]);
+      if (P.book != null) st.push(['Spellbook (minimum)', P.book]);
+      st.push(['Highest spell level', P.maxAny ? (P.arcanum && P.arcanum.length ? P.max + ' (+' + P.arcanum.join(', ') + ')' : P.max) : 'none yet']);
+      if (P.pact) st.push(['Pact slots', P.pact.n + ' \u00d7 level ' + P.pact.lvl]);
+      $('#stats').innerHTML = statHtml();
+      $('#mcTable').innerHTML = '';
+      $('#slots').innerHTML = P.pact ? '' : slotsHtml(P.slots);
+      notes = classNotes(X, false);
+    } else {
+      $('#rulesTitle').textContent = L.k.map(function (r) { return rowLabel(r) + ' ' + r.lvl; }).join(' / ');
+      $('#rulesSub').innerHTML = 'Character level ' + charLevel() + ' &middot; ' + esc(L.ed) + ' rules &middot; multiclass';
+      st.push(['Character level', charLevel()]);
+      if (C.casterLevel) st.push(['Caster level (slots)', C.casterLevel]);
+      var top = Math.max(C.max, C.pact ? C.pact.lvl : 0);
+      st.push(['Highest spell slot', C.maxAny ? (C.arcanum && C.arcanum.length ? top + ' (+' + C.arcanum.join(', ') + ')' : top) : 'none yet']);
+      if (C.pact) st.push(['Pact slots', C.pact.n + ' \u00d7 level ' + C.pact.lvl]);
+      $('#stats').innerHTML = statHtml();
+      $('#mcTable').innerHTML = '<table class="mc"><thead><tr><th scope="col">Class</th><th scope="col">Cantrips</th><th scope="col">Spells</th><th scope="col">Learn up to</th></tr></thead><tbody>' +
+        CTX.map(function (X) {
+          var P = X.P;
+          var sp = P.book != null ? P.count + ' prepared (' + P.book + '+ in book)' : P.kind ? P.count + ' ' + P.kind : '\u2013';
+          return '<tr><th scope="row">' + esc(X.label) + ' ' + X.r.lvl + (X.s && X.c.caster ? ' <span class="small muted">' + esc(X.s.short || X.s.name) + '</span>' : '') + '</th><td>' + (P.cantrips || 0) + '</td><td>' + esc(sp) + '</td><td>' + (P.maxAny ? 'level ' + P.maxAny : 'none yet') + '</td></tr>';
+        }).join('') + L.k.filter(function (r) { return r.cls === OTHER; }).map(function (r) {
+          return '<tr class="muted"><th scope="row">Other class ' + r.lvl + '</th><td colspan="3">no spellcasting</td></tr>';
+        }).join('') + '</tbody></table>';
+      $('#slots').innerHTML = C.max ? slotsHtml(C.slots) : '';
+      if (C.casterLevel) notes.push('Spell slots come from the multiclass Spellcaster table at caster level ' + C.casterLevel + ': ' +
+        C.parts.map(function (x) { return esc(x.label) + ' ' + x.r.lvl + ' (' + CONTRIB[x.P.caster] + ') = ' + x.contrib; }).join(' + ') + '.');
+      else if (C.max) {
+        var one = CTX.find(function (x) { return !x.P.pact && x.P.max > 0; });
+        notes.push('Only one of your classes has spell slots yet, so they come from the ' + esc(one.label) + ' table.');
+      }
+      notes.push('Each class learns or prepares its own spells with its own ability, only up to the highest level that class could cast on its own (the "Learn up to" column). Any slot can cast any of them. Pick which class each spell counts for in your list.');
+      notes.push('Multiclassing needs 13 or more in the main ability of each of your classes.');
+      CTX.forEach(function (X) { notes = notes.concat(classNotes(X, true)); });
+    }
     $('#rulesNotes').innerHTML = notes.map(function (n) { return '<li>' + n + '</li>'; }).join('');
-    void bk; void C;
   }
 
   // ------------------------------------------------------------ filters
-  var POOL = [], PROG = null, SUBS = {}, NAMES = [];
+  var POOL = [], CTX = [], COMBO = null;
   function prepare() {
-    POOL = pool(); PROG = prog(); SUBS = subSpells();
-    NAMES = [PROG.listClass].concat(extraLists());
+    POOL = pool(); CTX = contexts(); COMBO = combine(CTX);
   }
   function passBase(s, m) {
     if (F.scope === 'class' && !m.on) return false;
     if (F.books && F.books.indexOf(s.src) < 0) return false;
     return true;
   }
-  function passFilters(s) {
+  function passFilters(s, m) {
     if (F.q && norm(s.name).indexOf(norm(F.q)) < 0) return false;
     if (F.lv.length && F.lv.indexOf(s.lvl) < 0) return false;
     if (F.sch.length && F.sch.indexOf(s.school) < 0) return false;
@@ -360,16 +495,17 @@
       if (F.save === 'atk') { if (!s.atk) return false; }
       else if (!s.save || s.save.indexOf(F.save) < 0) return false;
     }
-    if (F.castable && s.lvl > PROG.maxAny && !(s.lvl === 0 && PROG.cantrips)) return false;
-    if (F.castable && s.lvl === 0 && !PROG.cantrips) return false;
+    if (F.castable && s.lvl > 0 && s.lvl > learnMax(m)) return false;
+    if (F.castable && s.lvl === 0 && !hasCantrips(m)) return false;
+    if (F.only && F.scope === 'class' && !m.by.some(function (x) { return x.key === F.only; })) return false;
     if (F.hidePicked && has(s.id)) return false;
     return true;
   }
   function results() {
     var out = [];
     POOL.forEach(function (s) {
-      var m = membership(s, PROG, SUBS, NAMES);
-      if (!passBase(s, m) || !passFilters(s)) return;
+      var m = membership(s);
+      if (!passBase(s, m) || !passFilters(s, m)) return;
       out.push({ s: s, m: m });
     });
     var q = norm(F.q);
@@ -387,6 +523,9 @@
   function renderFilters() {
     $('#search').value = F.q;
     $$('[data-scope]').forEach(function (b) { b.setAttribute('aria-checked', String(b.dataset.scope === F.scope)); });
+    if (F.only && !CTX.some(function (x) { return x.key === F.only; })) F.only = '';
+    $('#onlyCls').hidden = CTX.length < 2 || F.scope !== 'class';
+    $('#onlyCls').innerHTML = '<option value="">All my classes</option>' + CTX.map(function (x) { return '<option value="' + esc(x.key) + '"' + (F.only === x.key ? ' selected' : '') + '>' + esc(x.label) + ' list</option>'; }).join('');
     $$('[data-detail]').forEach(function (b) { b.setAttribute('aria-checked', String(b.dataset.detail === F.view)); });
     $('#lvlChips').innerHTML = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (n) {
       return '<button type="button" class="chip" data-lv="' + n + '" aria-pressed="' + (F.lv.indexOf(n) >= 0) + '" title="' + lvName(n) + '">' + (n === 0 ? 'C' : n) + '</button>';
@@ -430,7 +569,9 @@
     var t = [];
     if (s.conc) t.push('<span class="tag t-conc" title="Concentration">C</span>');
     if (s.ritual) t.push('<span class="tag t-rit" title="Ritual">R</span>');
-    if (m && m.sub) t.push('<span class="tag t-sub" title="From your subclass' + (m.sub.bySpellLevel ? '' : ', from level ' + m.sub.at) + '">' + KIND[m.sub.kind] + '</span>');
+    var multi = CTX.length > 1;
+    if (m && m.sub) t.push('<span class="tag t-sub" title="From your ' + (multi ? esc(m.subBy.label) + ' ' : '') + 'subclass' + (m.sub.bySpellLevel ? '' : ', from ' + (multi ? esc(m.subBy.label) + ' ' : '') + 'level ' + m.sub.at) + '">' + KIND[m.sub.kind] + (multi ? ' (' + esc(m.subBy.label) + ')' : '') + '</span>');
+    if (m && multi) m.by.forEach(function (x) { if (x !== m.subBy) t.push('<span class="tag t-cls" title="On the ' + esc(x.label) + ' spell list">' + esc(x.label) + '</span>'); });
     if (m && m.tce) t.push('<span class="tag t-opt" title="Optional class spell from Tasha\'s Cauldron of Everything">Tasha\'s optional</span>');
     if (s.legacy && L.ed === '2024') t.push('<span class="tag t-old" title="From a 2014-era book; not reprinted in the 2024 Player\'s Handbook">Older book</span>');
     return t.join('');
@@ -458,9 +599,19 @@
     }).join('');
   }
   function lineFor(s) { return (s.lvl === 0 ? s.school + ' cantrip' : 'Level ' + s.lvl + ' ' + s.school.toLowerCase()); }
+  // "Castable from level 9" / "From Wizard level 5": the soonest class level that can learn this spell
+  function whenText(s, m) {
+    var best = null;
+    (m.by.length ? m.by : CTX).forEach(function (x) {
+      var l = minLevelFor(s.lvl, x.r);
+      if (l && (!best || l - x.r.lvl < best.l - best.x.r.lvl)) best = { l: l, x: x };
+    });
+    if (!best) return CTX.length > 1 ? 'Not castable by these classes' : 'Not castable by this class';
+    return CTX.length > 1 ? 'From ' + esc(best.x.label) + ' level ' + best.l : 'Castable from level ' + best.l;
+  }
   function card(r) {
     var s = r.s, m = r.m, on = has(s.id);
-    var tooHigh = s.lvl > PROG.maxAny && s.lvl > 0;
+    var tooHigh = s.lvl > learnMax(m) && s.lvl > 0;
     var h = '<article class="card' + (tooHigh ? ' locked' : '') + (m.on ? '' : ' off-list') + '" data-id="' + s.id + '" style="--h:' + SCH_HUE[s.school] + '">';
     h += '<div class="card-top"><h3><button type="button" class="linkish nm" data-open="' + s.id + '">' + esc(s.name) + '</button></h3><span class="cr" title="' + lvName(s.lvl) + '">' + lvShort(s.lvl) + '</span></div>';
     h += '<div class="meta">' + esc(lineFor(s)) + (F.view === 'basic' ? ' &middot; ' + esc(s.time) : '') + '</div>';
@@ -472,7 +623,7 @@
       h += s.text ? '<div class="itext mini">' + blocksHtml(s.text) + (s.higher ? '<p><b><i>' + (s.lvl ? 'At Higher Levels.' : 'Cantrip Upgrade.') + '</i></b> ' + blocksHtml(s.higher).replace(/^<p>|<\/p>$/g, '') + '</p>' : '') + '</div>'
         : '<p class="small muted factsonly">Rules text: ' + esc(DATA.books[s.src].name) + (s.page ? ' p.' + s.page : '') + '.</p>';
     }
-    if (tooHigh) { var ml = minLevelFor(s.lvl); h += '<div class="why">' + (ml ? 'Castable from level ' + ml : 'Not castable by this class') + '</div>'; }
+    if (tooHigh) h += '<div class="why">' + whenText(s, m) + '</div>';
     h += '<button type="button" class="fav add" data-add="' + s.id + '" aria-pressed="' + on + '" aria-label="' + (on ? 'Remove ' : 'Add ') + esc(s.name) + (on ? ' from' : ' to') + ' my list" title="' + (on ? 'On your list: click to remove' : 'Add to my list') + '">' +
       '<svg viewBox="0 0 24 24" aria-hidden="true">' + (on ? '<path d="M5 12l5 5 9-10"/>' : '<path d="M12 5v14M5 12h14"/>') + '</svg></button>';
     return h + '</article>';
@@ -488,54 +639,72 @@
   }
 
   // ------------------------------------------------------------ my list
-  function counts(P) {
-    var c = { cantrips: 0, spells: 0, prepared: 0 };
+  function classCounts() {
+    var out = { _: { cantrips: 0, spells: 0, prepared: 0 } };
+    CTX.forEach(function (x) { out[x.key] = { cantrips: 0, spells: 0, prepared: 0 }; });
     L.items.forEach(function (it) {
-      var s = SP[it.id];
-      if (!s) return;
-      if (s.lvl === 0) c.cantrips++; else { c.spells++; if (it.p) c.prepared++; }
+      var sp = SP[it.id];
+      if (!sp) return;
+      var x = assigned(it, sp), c = x ? out[x.key] : out._;
+      if (sp.lvl === 0) c.cantrips++; else { c.spells++; if (it.p) c.prepared++; }
     });
-    return c;
+    return out;
+  }
+  function slotText(lv) {
+    var C = COMBO, parts = [], n = C.slots[lv - 1];
+    if (n) parts.push(n + ' slot' + (n === 1 ? '' : 's'));
+    if (C.pact && lv <= C.pact.lvl) parts.push('pact slots');
+    else if (C.arcanum && C.arcanum.indexOf(lv) >= 0) parts.push('Mystic Arcanum');
+    return parts.join(' + ') || 'not yet';
   }
   function renderMine() {
-    var P = PROG, C = counts(P), SS = SUBS;
+    var K = classCounts(), multi = CTX.length > 1;
     $('#mineTitle').textContent = L.name;
-    var c = clsRec(), s = subRec();
-    $('#mineSub').textContent = (s && !c.caster ? s.name : c.name + (s ? ' (' + s.short + ')' : '')) + ', level ' + L.lvl + ', ' + L.ed + ' rules';
-    var cs = [];
+    var sub;
+    if (L.k.length > 1) sub = L.k.map(function (r) { return rowLabel(r) + ' ' + r.lvl; }).join(' / ');
+    else { var X0 = CTX[0]; sub = (X0.s && !X0.c.caster ? X0.s.name : X0.c.name + (X0.s ? ' (' + X0.s.short + ')' : '')) + ', level ' + X0.r.lvl; }
+    $('#mineSub').textContent = sub + ', ' + L.ed + ' rules';
     var meter = function (label, have, max, title) {
       var cls = max == null ? '' : have > max ? ' over' : have === max ? ' full' : '';
       return '<span class="meter' + cls + '" title="' + esc(title || '') + '"><b>' + have + (max == null ? '' : ' / ' + max) + '</b> ' + label + '</span>';
     };
-    cs.push(meter('cantrips', C.cantrips, P.cantrips || 0, 'Cantrips on your list / cantrips you know at this level'));
-    if (P.book != null) {
-      cs.push(meter('in spellbook', C.spells, null, 'Leveled spells on your list'));
-      cs.push(meter('prepared (P)', C.prepared, P.count, 'Spells marked P / spells you can prepare'));
-    } else if (P.kind) {
-      cs.push(meter(P.kind === 'known' ? 'known' : 'prepared', C.spells, P.count, 'Leveled spells on your list / spells you ' + (P.kind === 'known' ? 'know' : 'can prepare') + ' at this level'));
-    }
-    $('#counts').innerHTML = cs.join('');
+    var html = CTX.map(function (X) {
+      var P = X.P, C = K[X.key], cs = [];
+      if (P.cantrips || C.cantrips) cs.push(meter('cantrips', C.cantrips, P.cantrips || 0, X.label + ' cantrips on your list / cantrips you know at this level'));
+      if (P.book != null) {
+        cs.push(meter('in spellbook', C.spells, null, 'Leveled ' + X.label + ' spells on your list'));
+        cs.push(meter('prepared (P)', C.prepared, P.count, 'Spells marked P / spells you can prepare'));
+      } else if (P.kind) {
+        cs.push(meter(P.kind === 'known' ? 'known' : 'prepared', C.spells, P.count, 'Leveled ' + X.label + ' spells on your list / spells you ' + (P.kind === 'known' ? 'know' : 'can prepare') + ' at this level'));
+      }
+      return (multi ? '<span class="mlabel">' + esc(X.label) + '</span>' : '') + cs.join('');
+    }).join(multi ? '<span class="msep"></span>' : '');
+    var o = K._.cantrips + K._.spells;
+    if (o) html += (multi ? '<span class="msep"></span>' : '') + meter('other, not counted', o, null, 'Spells not counted against a class (feats, items, or not on your class list). Pick a class for a spell in its row to count it.');
+    $('#counts').innerHTML = html;
     $('#tabCount').textContent = '(' + L.items.length + ')';
     $('#tabCount').setAttribute('aria-label', L.items.length + ' spells');
 
-    var byLv = {};
+    var byLv = {}, seenFixed = {};
     for (var i = 0; i <= 9; i++) byLv[i] = { fixed: [], items: [] };
-    Object.keys(SS).forEach(function (id) {
-      var x = SS[id], sp = SP[id];
-      if (sp && x.kind !== 'expanded' && unlocked(x, sp, P)) byLv[sp.lvl].fixed.push(sp);
+    CTX.forEach(function (X) {
+      Object.keys(X.SS).forEach(function (id) {
+        var x = X.SS[id], sp = SP[id];
+        if (sp && x.kind !== 'expanded' && unlocked(x, sp, X) && !seenFixed[id]) { seenFixed[id] = 1; byLv[sp.lvl].fixed.push({ sp: sp, x: x, X: X }); }
+      });
     });
     var unknown = [];
     L.items.forEach(function (it) { var sp = SP[it.id]; if (sp) byLv[sp.lvl].items.push(it); else unknown.push(it); });
-    var html = '';
+    html = '';
     for (var lv = 0; lv <= 9; lv++) {
       var g = byLv[lv];
       if (!g.fixed.length && !g.items.length) continue;
-      var slotTxt = lv === 0 ? '' : P.pact ? (lv <= P.pact.lvl ? 'pact slots' : (P.arcanum && P.arcanum.indexOf(lv) >= 0 ? 'Mystic Arcanum' : 'not yet')) : (P.slots[lv - 1] ? P.slots[lv - 1] + ' slot' + (P.slots[lv - 1] === 1 ? '' : 's') : 'not yet');
+      var slotTxt = lv === 0 ? '' : slotText(lv);
       html += '<section class="grp" data-lv="' + lv + '"><h3>' + (lv === 0 ? 'Cantrips' : 'Level ' + lv) + ' <span class="n">' + g.items.length + '</span>' + (slotTxt ? '<span class="gslots">' + slotTxt + '</span>' : '') + '</h3><ul class="rows">';
-      g.fixed.forEach(function (sp) {
-        html += '<li class="row fixed"><span class="fixmark" aria-hidden="true">\u2605</span><button type="button" class="linkish nm" data-open="' + sp.id + '">' + esc(sp.name) + '</button><span class="tag t-sub">' + KIND[SS[sp.id].kind] + '</span>' + pfacts(sp) + '</li>';
+      g.fixed.forEach(function (f) {
+        html += '<li class="row fixed"><span class="fixmark" aria-hidden="true">\u2605</span><button type="button" class="linkish nm" data-open="' + f.sp.id + '">' + esc(f.sp.name) + '</button><span class="tag t-sub">' + KIND[f.x.kind] + (multi ? ' (' + esc(f.X.label) + ')' : '') + '</span>' + pfacts(f.sp) + '</li>';
       });
-      g.items.forEach(function (it, k) { html += rowHtml(it, SP[it.id], k, g.items.length, P); });
+      g.items.forEach(function (it, k) { html += rowHtml(it, SP[it.id], k, g.items.length); });
       html += '</ul></section>';
     }
     if (unknown.length) {
@@ -546,16 +715,22 @@
     if (!html) html = '<p class="empty">No spells yet. Use <b>+</b> on a spell card to add it here.</p>';
     $('#groups').innerHTML = html;
   }
-  function rowHtml(it, sp, k, n, P) {
-    var nm = esc(sp.name);
-    var tooHigh = sp.lvl > P.maxAny && sp.lvl > 0;
+  function rowHtml(it, sp, k, n) {
+    var nm = esc(sp.name), X = assigned(it, sp), m = membership(sp), multi = CTX.length > 1;
+    var tooHigh = sp.lvl > 0 && sp.lvl > (X ? X.P.maxAny : COMBO.maxAny);
     var h = '<li class="row' + (tooHigh ? ' locked' : '') + '" data-id="' + sp.id + '">';
     h += '<button type="button" class="handle" data-drag aria-label="Move ' + nm + ': drag, or use the up and down arrow keys" title="Drag to reorder (or focus and use arrow keys)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>';
     h += '<span class="rank" aria-hidden="true">' + (k + 1) + '</span>';
     h += '<select class="tier" data-tier="' + sp.id + '" aria-label="Tier for ' + nm + '"' + (it.t ? ' data-t="' + it.t + '"' : '') + '><option value="">\u2013</option>' + TIERS.map(function (t) { return '<option value="' + t + '"' + (it.t === t ? ' selected' : '') + ' title="' + TIER_NAME[t] + '">' + t + '</option>'; }).join('') + '</select>';
     h += '<span class="row-main"><button type="button" class="linkish nm" data-open="' + sp.id + '">' + nm + '</button>' + (sp.conc ? '<span class="tag t-conc" title="Concentration">C</span>' : '') + (sp.ritual ? '<span class="tag t-rit" title="Ritual">R</span>' : '') +
-      (tooHigh ? '<span class="small muted"> (later)</span>' : '') + (it.t ? '<span class="ptier">' + it.t + '</span>' : '') + (it.p ? '<span class="ptier">Prepared</span>' : '') + '</span>' + pfacts(sp);
-    if (P.book != null && sp.lvl > 0) h += '<label class="prep" title="Prepared today"><input type="checkbox" data-prep="' + sp.id + '"' + (it.p ? ' checked' : '') + '> P</label>';
+      (tooHigh ? '<span class="small muted"> (later)</span>' : '') + (it.t ? '<span class="ptier">' + it.t + '</span>' : '') + (it.p ? '<span class="ptier">Prepared</span>' : '') +
+      (multi || !X ? '<span class="ptier">' + (X ? esc(X.label) : 'Other') + '</span>' : '') + '</span>' + pfacts(sp);
+    if (X && X.P.book != null && sp.lvl > 0) h += '<label class="prep" title="Prepared today"><input type="checkbox" data-prep="' + sp.id + '"' + (it.p ? ' checked' : '') + '> P</label>';
+    if (multi || !m.on || it.c) {
+      h += '<select class="rcls" data-rcls="' + sp.id + '" aria-label="Class ' + nm + ' counts for" title="Which class this spell counts for">' +
+        CTX.map(function (x) { var on = m.by.indexOf(x) >= 0; return '<option value="' + esc(x.key) + '"' + (X === x ? ' selected' : '') + '>' + esc(x.label) + (on ? '' : ' (not on its list)') + '</option>'; }).join('') +
+        '<option value="-"' + (!X ? ' selected' : '') + '>Other (feat, item...)</option></select>';
+    }
     h += '<span class="row-btns">' +
       '<button type="button" class="mini-btn" data-mv="-1" data-id="' + sp.id + '" aria-label="Move ' + nm + ' up"' + (k === 0 ? ' disabled' : '') + '>\u25b2</button>' +
       '<button type="button" class="mini-btn" data-mv="1" data-id="' + sp.id + '" aria-label="Move ' + nm + ' down"' + (k === n - 1 ? ' disabled' : '') + '>\u25bc</button>' +
@@ -623,7 +798,7 @@
     if (!s) return;
     var dlg = $('#detail');
     dlg.dataset.id = id;
-    var m = membership(s, PROG, SUBS, NAMES), on = has(id), it = item(id);
+    var m = membership(s), on = has(id), it = item(id);
     var twins = (BYNAME[norm(s.name)] || []).filter(function (x) { return x.id !== id; });
     var h = '<div class="sb-head"><h2 id="dTitle">' + esc(s.name) + '</h2></div>';
     h += '<p class="sb-sub">' + esc(lineFor(s)) + (s.ritual ? ' (ritual)' : '') + ' ' + srcTag(s) + '</p>';
@@ -673,22 +848,58 @@
     $$('[data-ed]').forEach(function (b) {
       b.addEventListener('click', function () {
         if (L.ed === b.dataset.ed) return;
-        var oldCls = L.cls, oldSub = subRec();
+        var old = L.k.map(function (r) { return subRec(r); });
         remapEdition(b.dataset.ed);
         L.ed = b.dataset.ed;
-        L.cls = oldCls;
-        if (!classes().some(function (c) { return c.id === oldCls; })) L.cls = casterClasses()[0].id;
-        L.sub = null;
-        if (oldSub) { var n = subs().find(function (x) { return x.short === oldSub.short || x.name === oldSub.name; }); if (n) L.sub = n.id; }
+        L.k.forEach(function (r, i) {
+          if (r.cls === OTHER) return;
+          if (!classes().some(function (c) { return c.id === r.cls; })) r.cls = casterClasses()[0].id;
+          r.sub = null;
+          var o = old[i];
+          if (o) { var n = subs(r).find(function (x) { return x.short === o.short || x.name === o.name; }); if (n) r.sub = n.id; }
+        });
         F.books = null; shown = PAGE;
         saveLists(); renderAll();
       });
     });
-    $('#cls').addEventListener('change', function () { L.cls = this.value; L.sub = null; L.opt = null; shown = PAGE; saveLists(); renderAll(); });
-    $('#sub').addEventListener('change', function () { L.sub = this.value || null; L.opt = null; saveLists(); renderAll(); });
-    $('#opt').addEventListener('change', function () { L.opt = this.value; saveLists(); renderAll(); });
-    $('#lvl').addEventListener('input', function () { L.lvl = +this.value; $('#lvlOut').textContent = L.lvl; saveLists(); refreshCards(); });
-    $('#mod').addEventListener('input', function () { var v = parseInt(this.value, 10); if (isNaN(v)) return; L.mod = Math.max(-5, Math.min(10, v)); saveLists(); refreshCards(); });
+    var rows = $('#classRows');
+    var rowOf = function (el) { var w = el.closest('[data-row]'); return w ? L.k[+w.dataset.row] : null; };
+    rows.addEventListener('change', function (e) {
+      var t = e.target, r = rowOf(t), f = t.dataset.f;
+      if (!r || !f) return;
+      if (f === 'cls') { r.cls = t.value; r.sub = null; r.opt = null; shown = PAGE; }
+      else if (f === 'sub') { r.sub = t.value || null; r.opt = null; }
+      else if (f === 'opt') r.opt = t.value;
+      else if (f === 'lvl') r.lvl = +t.value;
+      else return;
+      var id = t.id;
+      saveLists(); renderAll();
+      var again = document.getElementById(id); if (again) again.focus();
+    });
+    rows.addEventListener('input', function (e) {
+      var t = e.target, r = rowOf(t), f = t.dataset.f;
+      if (!r) return;
+      if (f === 'lvl') { r.lvl = +t.value; t.previousElementSibling.querySelector('output').textContent = r.lvl; saveLists(); refreshCards(); }
+      else if (f === 'mod') { var v = parseInt(t.value, 10); if (isNaN(v)) return; r.mod = Math.max(-5, Math.min(10, v)); saveLists(); refreshCards(); }
+    });
+    rows.addEventListener('click', function (e) {
+      var t = e.target.closest('#addCls, [data-rmrow]');
+      if (!t) return;
+      if (t.id === 'addCls') {
+        if (L.k.length >= MAXROWS || charLevel() >= 20) return;
+        var used = L.k.map(function (r) { return r.cls; });
+        var c = casterClasses().find(function (x) { return used.indexOf(x.id) < 0; });
+        L.k.push({ cls: c ? c.id : OTHER, sub: null, opt: null, lvl: 1, mod: 3 });
+        saveLists(); renderAll();
+        var sel = document.getElementById('cls' + (L.k.length - 1)); if (sel) sel.focus();
+      } else {
+        var i = +t.dataset.rmrow;
+        L.k.splice(i, 1);
+        if (L.k[0].cls === OTHER) L.k[0].cls = casterClasses()[0].id;
+        saveLists(); renderAll();
+        var a = $('#addCls') || $('#cls0'); if (a) a.focus();
+      }
+    });
     $('#listSel').addEventListener('change', function () {
       L = LS.lists.find(function (x) { return x.id === this.value; }, this) || L; editing = {}; shown = PAGE; saveLists(); renderAll();
     });
@@ -779,6 +990,7 @@
     document.addEventListener('change', function (e) {
       var t = e.target;
       if (t.dataset.tier) { var it = item(t.dataset.tier); if (it) { it.t = t.value; saveLists(); renderMine(); if ($('#detail').open && t.id !== 'dTier') openSpell($('#detail').dataset.id); } return; }
+      if (t.dataset.rcls) { var ic = item(t.dataset.rcls); if (ic) { ic.c = t.value; saveLists(); renderMine(); var rc = $('#groups [data-rcls="' + ic.id + '"]'); if (rc) rc.focus(); } return; }
       if (t.dataset.prep) { var ip = item(t.dataset.prep); if (ip) { ip.p = t.checked; saveLists(); renderMine(); var c = $('#groups [data-prep="' + ip.id + '"]'); if (c) c.focus(); } return; }
       if (t.dataset.src) {
         var all = Object.keys(DATA.books);
@@ -822,6 +1034,7 @@
     ['time', 'conc', 'rit', 'dmg', 'save', 'sort'].forEach(function (k) {
       $('#' + k).addEventListener('change', function () { F[k] = this.value; shown = PAGE; renderList(); writeUrl(); });
     });
+    $('#onlyCls').addEventListener('change', function () { F.only = this.value; shown = PAGE; renderList(); writeUrl(); });
     $('#castable').addEventListener('change', function () { F.castable = this.checked; shown = PAGE; renderList(); writeUrl(); });
     $('#hidePicked').addEventListener('change', function () { F.hidePicked = this.checked; shown = PAGE; renderList(); writeUrl(); });
     $('#optTog').addEventListener('change', function () { F.opt = this.checked; shown = PAGE; prepare(); renderFilters(); renderList(); renderMine(); writeUrl(); });
