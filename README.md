@@ -15,6 +15,7 @@ Plan spell lists for 2014 and 2024 D&D 5e rules: class and subclass spell lists,
 - **Print my spell sheet** (in the list menu) prints the spellcasting stats and your ranked list, with each spell's casting time, range, components, duration, save, book and page, plus your tiers and notes.
 - Keep as many lists as you like (saved in this browser's localStorage), copy a **share link** that carries the whole list in the URL (`#list=...`), and **export/import** every list as a JSON backup.
 - Filters live in the URL (`?lv=1,2&school=Evocation&conc=yes&view=full`), and `?spell=xphb.fireball` opens one spell.
+- **Shared characters** (toolbox `dnd.characters`, `site/character.js`): the active character gets its own list (`links['dnd-magic'] = {list}`), filled from its classes, levels, subclasses (matched with `DndChar.sameSub`) and ability scores, and kept in step when the character changes on another site. Spells and ranks are never touched. "Save as a shared character" and "Unlink" are in the list menu and build bar; `?char=<id>` opens a character.
 - The header, footer, theme (`dnd.theme`) and update notice follow the shared toolbox conventions (`WernerCD/dnd`, `STYLE.md`). The change log is `site/changes.html`.
 
 ## Data and copyright

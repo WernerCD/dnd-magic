@@ -215,6 +215,7 @@
       name: String(x.name || 'Imported list').slice(0, 60),
       ed: x.ed === '2014' ? '2014' : '2024',
       k: k,
+      ch: typeof x.ch === 'string' ? x.ch.slice(0, 40) : undefined, chU: typeof x.chU === 'string' ? x.chU.slice(0, 40) : undefined,
       items: items.filter(function (it) { return it && typeof it.id === 'string'; }).slice(0, 400).map(function (it) {
         var o = { id: it.id.slice(0, 80), t: TIERS.indexOf(it.t) >= 0 ? it.t : '', n: String(it.n || '').slice(0, 500), p: !!it.p };
         if (it.c) o.c = String(it.c).slice(0, 40);
@@ -237,6 +238,121 @@
     });
     var seen = {};
     L.items = L.items.filter(function (it) { if (seen[it.id]) return false; seen[it.id] = 1; return true; });
+  }
+
+  // ------------------------------------------------------------ shared characters (dnd.characters, STYLE 6c)
+  // A character gets one spell list here holding all its spellcasting classes (multiclass). The list remembers
+  // the character (L.ch) and the character's 'updated' stamp it was last synced from (L.chU); the character's
+  // link links['dnd-magic'] = { list: <preferred list id> }. Syncing only changes rules, classes, levels,
+  // subclasses and modifiers, never the spells, tiers or notes.
+  var REPO = 'dnd-magic';
+  var DC = window.DndChar || null;
+  function charOf(x) { return DC && x && x.ch ? DC.get(x.ch) : null; }
+  // the character's classes as list rows (at most 3, non-casters folded into one "other" row)
+  function charRows(ch) {
+    var keep = L, rows = [], other = 0;
+    L = { ed: ch.ed, k: [] };
+    ch.classes.forEach(function (x) {
+      var c = casterClasses().find(function (c) { return c.id === x.cls; });
+      var row = c ? { cls: c.id, sub: null, opt: null, lvl: x.lvl, mod: 0 } : null;
+      if (row) {
+        var s = subs(row).find(function (s) { return DC.sameSub({ sub: s.id, subName: s.name }, x) || DC.sameSub({ sub: s.short, subName: s.short }, x); });
+        if (s) row.sub = s.id;
+        else if (!c.caster) row = null;   // a Fighter or Rogue that is not an Eldritch Knight or Arcane Trickster
+      }
+      if (row) {
+        var src = row.sub && subRec(row) && subRec(row).caster ? subRec(row) : c;
+        row.mod = Math.max(-5, Math.min(10, DC.mod(ch, src.ability || c.ability)));
+      }
+      if (row && rows.length < MAXROWS - (other ? 1 : 0)) rows.push(row); else other += x.lvl;
+    });
+    L = keep;
+    if (rows.length && other) {
+      if (rows.length === MAXROWS) rows.pop();
+      rows.push({ cls: OTHER, sub: null, opt: null, lvl: Math.min(other, 20), mod: 0 });
+    }
+    return rows;
+  }
+  // bring one list in line with its character; returns true if anything changed
+  function syncList(x, ch) {
+    var rows = charRows(ch);
+    if (!rows.length) return false;
+    var before = JSON.stringify([x.ed, x.k]);
+    if (x.ed !== ch.ed) { var keep = L; L = x; remapEdition(ch.ed); L = keep; x.ed = ch.ed; }
+    rows.forEach(function (r) { var o = x.k.find(function (y) { return y.cls === r.cls && y.sub === r.sub; }); if (o && o.opt) r.opt = o.opt; });
+    x.k = rows;
+    x.chU = ch.updated;
+    return JSON.stringify([x.ed, x.k]) !== before;
+  }
+  function charLists(ch) { return LS.lists.filter(function (x) { return x.ch === ch.id; }); }
+  // switch to the active character's list, creating it if needed; quiet = no notices
+  function useChar(ch, quiet) {
+    if (!DC || !ch) return false;
+    if (!charRows(ch).length) { if (!quiet) notice(ch.name + ' has no spellcasting class yet, so your lists stay as they are.'); return false; }
+    var mine = charLists(ch), link = ch.links[REPO] || {};
+    var x = mine.find(function (y) { return y.id === link.list; }) || mine[0];
+    if (!x) {
+      x = { id: uid(), name: (ch.name + "'s spells").slice(0, 60), ed: ch.ed, k: [], items: [], ch: ch.id };
+      // a brand-new visitor's empty starter list is replaced, not kept beside it
+      if (LS.lists.length === 1 && !LS.lists[0].items.length && !LS.lists[0].ch) LS.lists = [];
+      LS.lists.push(x);
+      if (!quiet) notice('Made the list "' + x.name + '" for ' + ch.name + ' (' + DC.summary(ch) + ').');
+    }
+    syncList(x, ch);
+    L = x;
+    if (link.list !== x.id) DC.setLink(ch.id, REPO, { list: x.id });
+    return true;
+  }
+  // characters changed (here, in another tab, or on another site): resync linked lists, follow the active one
+  var lastActive = null, quietChars = false;
+  function onChars(active) {
+    if (quietChars) return;
+    var changed = false;
+    LS.lists.forEach(function (x) {
+      var ch = charOf(x);
+      if (ch && ch.updated !== x.chU && syncList(x, ch)) changed = true;
+      else if (ch) x.chU = ch.updated;
+    });
+    var aid = active ? active.id : null;
+    if (aid !== lastActive) {
+      lastActive = aid;
+      store.set('dm.char', aid);
+      if (active && L.ch !== aid && useChar(active)) changed = true;
+    }
+    if (changed || LS.lists.some(function (x) { return x.ch && !charOf(x); })) { editing = {}; shown = PAGE; }
+    saveLists();
+    renderAll();
+  }
+  // "Save as character": a new shared character from this list's classes (only when the list has none)
+  function saveAsChar() {
+    if (!DC) return;
+    var name = prompt('Name for the new character:', L.name.replace(/'s spells$/, ''));
+    if (name == null || !name.trim()) return;
+    var ab = [10, 10, 10, 10, 10, 10], ix = { str: 0, dex: 1, con: 2, int: 3, wis: 4, cha: 5 };
+    var cls = L.k.filter(function (r) { return r.cls !== OTHER; }).map(function (r) {
+      var c = clsRec(r), s = subRec(r), src = s && s.caster ? s : c;
+      if (c.preparedFormula && ix[c.ability] != null) ab[ix[c.ability]] = Math.max(ab[ix[c.ability]], 10 + 2 * r.mod);
+      return { cls: c.id, lvl: r.lvl, sub: s ? s.id : null, subName: s ? s.name : null, ab: src.ability };
+    });
+    quietChars = true;
+    var ch = DC.save({ name: name.trim().slice(0, 60), ed: L.ed, ab: ab,
+      classes: cls.map(function (x) { return { cls: x.cls, lvl: x.lvl, sub: x.sub, subName: x.subName }; }), links: {} }, REPO);
+    L.ch = ch.id; L.chU = ch.updated;
+    saveLists();
+    DC.setLink(ch.id, REPO, { list: L.id });
+    lastActive = ch.id;
+    store.set('dm.char', ch.id);
+    DC.setActive(ch.id);
+    quietChars = false;
+    renderAll();
+    notice('Saved ' + ch.name + ' as a shared character. The other D&D Toolbox sites can use it now.' +
+      (L.k.some(function (r) { return r.cls === OTHER; }) ? ' Classes without spellcasting were left out; add them in the Multiclass Planner.' : ''));
+  }
+  function charNote() {
+    var ch = charOf(L);
+    if (!ch) return '';
+    return '<span class="small muted charnote">Linked to <b>' + esc(ch.name) + '</b> (' + esc(DC.summary(ch)) + '). Level-ups made on other sites update this list; changes here stay in this list.' +
+      ' <button type="button" class="linkish" id="unlinkChar">Unlink</button></span>';
   }
 
   // ------------------------------------------------------------ share / export
@@ -391,7 +507,9 @@
     if (L.k.length < MAXROWS) h += '<div class="crow crow-add"><button type="button" class="btn" id="addCls"' + (free < 1 ? ' disabled title="Your character is already level 20"' : '') + '>+ Add a class (multiclass)</button>' +
       (L.k.length > 1 ? '<span class="small muted">Character level ' + charLevel() + '</span>' : '') + '</div>';
     else h += '<div class="crow crow-add"><span class="small muted">Character level ' + charLevel() + ' (3 classes at most here)</span></div>';
-    $('#classRows').innerHTML = h;
+    $('#classRows').innerHTML = h + charNote();
+    var sc = $('[data-act="savechar"]');
+    if (sc) sc.hidden = !DC || !!charOf(L);
     $('#listSel').innerHTML = LS.lists.map(function (x) { return '<option value="' + esc(x.id) + '"' + (x.id === L.id ? ' selected' : '') + '>' + esc(x.name) + '</option>'; }).join('');
     $('#optTogText').textContent = L.ed === '2014' ? "Tasha's optional class spells" : 'Spells from older books';
     $('#optTogWrap').title = L.ed === '2014' ? "Include the optional class spells Tasha's Cauldron of Everything adds to each list" : 'Include spells from 2014-era books that the 2024 Player\'s Handbook did not reprint';
@@ -663,7 +781,8 @@
     var sub;
     if (L.k.length > 1) sub = L.k.map(function (r) { return rowLabel(r) + ' ' + r.lvl; }).join(' / ');
     else { var X0 = CTX[0]; sub = (X0.s && !X0.c.caster ? X0.s.name : X0.c.name + (X0.s ? ' (' + X0.s.short + ')' : '')) + ', level ' + X0.r.lvl; }
-    $('#mineSub').textContent = sub + ', ' + L.ed + ' rules';
+    var owner = charOf(L);
+    $('#mineSub').textContent = (owner ? owner.name + ': ' : '') + sub + ', ' + L.ed + ' rules';
     var meter = function (label, have, max, title) {
       var cls = max == null ? '' : have > max ? ' over' : have === max ? ' full' : '';
       return '<span class="meter' + cls + '" title="' + esc(title || '') + '"><b>' + have + (max == null ? '' : ' / ' + max) + '</b> ' + label + '</span>';
@@ -883,6 +1002,13 @@
       else if (f === 'mod') { var v = parseInt(t.value, 10); if (isNaN(v)) return; r.mod = Math.max(-5, Math.min(10, v)); saveLists(); refreshCards(); }
     });
     rows.addEventListener('click', function (e) {
+      if (e.target.closest('#unlinkChar')) {
+        var och = charOf(L);
+        delete L.ch; delete L.chU;
+        if (och && (och.links[REPO] || {}).list === L.id) DC.setLink(och.id, REPO, null);
+        saveLists(); renderAll(); notice('This list is no longer linked to a character.');
+        return;
+      }
       var t = e.target.closest('#addCls, [data-rmrow]');
       if (!t) return;
       if (t.id === 'addCls') {
@@ -910,7 +1036,7 @@
       var act = b.dataset.act, name;
       if (act === 'new') { name = prompt('Name for the new list:', 'New list'); if (name == null) return; L = newList(name.trim() || 'New list'); LS.lists.push(L); }
       else if (act === 'rename') { name = prompt('Rename this list:', L.name); if (name == null || !name.trim()) return; L.name = name.trim().slice(0, 60); }
-      else if (act === 'dup') { var d = clean(JSON.parse(JSON.stringify(L))); d.id = uid(); d.name = (L.name + ' (copy)').slice(0, 60); LS.lists.push(d); L = d; }
+      else if (act === 'dup') { var d = clean(JSON.parse(JSON.stringify(L))); d.id = uid(); delete d.ch; delete d.chU; d.name = (L.name + ' (copy)').slice(0, 60); LS.lists.push(d); L = d; }
       else if (act === 'clear') { if (!L.items.length || !confirm('Remove all ' + L.items.length + ' spells from "' + L.name + '"?')) return; L.items = []; }
       else if (act === 'delete') {
         if (!confirm('Delete the list "' + L.name + '"? Export first if you want a backup.')) return;
@@ -930,6 +1056,7 @@
         return;
       }
       else if (act === 'import') { $('#importFile').click(); return; }
+      else if (act === 'savechar') { saveAsChar(); return; }
       else if (act === 'print') { window.print(); return; }
       editing = {}; saveLists(); renderAll();
     });
@@ -1077,7 +1204,19 @@
     d.spells.forEach(function (s) { SP[s.id] = s; (BYNAME[norm(s.name)] = BYNAME[norm(s.name)] || []).push(s); });
     loadLists();
     var spell = readUrl();
+    var hadShare = /#list=/.test(location.hash);
     readShare();
+    if (DC) {
+      LS.lists.forEach(function (x) { var ch = charOf(x); if (ch && ch.updated !== x.chU) syncList(x, ch); });
+      var act = DC.active();
+      lastActive = act ? act.id : null;
+      // switch to the character's list; make one only for a character this site has not seen active before
+      // (so a list the user unlinked does not come back on the next visit)
+      if (act && !hadShare && L.ch !== act.id && (charLists(act).length || store.get('dm.char', null) !== act.id)) useChar(act, true);
+      store.set('dm.char', lastActive);
+      saveLists();
+      DC.onChange(onChars);
+    }
     $('#generated').textContent = 'Data built ' + d.generated + ': ' + d.spells.length + ' spells, ' + d.spells.filter(function (s) { return s.text; }).length + ' with SRD text.';
     bind();
     renderAll();

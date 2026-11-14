@@ -25,6 +25,7 @@
 <header class="site-header">
   <div class="wrap hub-bar">
     <a href="https://wernercd.github.io/dnd/">&larr; D&amp;D Toolbox</a>
+    <span class="char-pick" id="charPick"></span>
     <nav class="hub-nav" aria-label="Site">
       <a href="./" aria-current="page">Tool</a>
       <a href="changes.html">Changes</a>
@@ -67,6 +68,7 @@
             <button type="button" data-act="clear">Remove all spells from this list</button>
             <button type="button" data-act="delete">Delete this list</button>
             <hr>
+            <button type="button" data-act="savechar">Save as a shared character</button>
             <button type="button" data-act="print">Print my spell sheet</button>
             <button type="button" data-act="share">Copy share link</button>
             <button type="button" data-act="export">Export all lists (JSON)</button>
@@ -212,6 +214,7 @@
   </div>
 </dialog>
 
+<script src="character.js?v=dev"></script>
 <script src="app.js?v=dev"></script>
 <script src="theme.js?v=dev"></script>
 <script src="version.js?v=dev"></script>
