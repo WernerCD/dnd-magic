@@ -389,6 +389,8 @@ a.srctag:hover { text-decoration: underline; }
 .crow-add { align-items: center; gap: 12px; }
 .charnote { display: block; line-height: 1.45; }
 .charnote .linkish { font-size: inherit; }
+.charpend { background: var(--warn-bg); color: var(--ink); border-radius: 8px; padding: 8px 10px; }
+.charpend .btn { margin-top: 6px; }
 .crow-rm { width: 36px; height: 36px; font-size: .9rem; }
 .mc { border-collapse: collapse; margin: 4px 0 10px; font-size: .9rem; }
 .mc th, .mc td { text-align: left; padding: 4px 14px 4px 0; border-bottom: 1px solid var(--line); vertical-align: baseline; }

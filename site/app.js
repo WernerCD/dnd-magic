@@ -221,7 +221,7 @@
       name: String(x.name || 'Imported list').slice(0, 60),
       ed: x.ed === '2014' ? '2014' : '2024',
       k: k,
-      ch: typeof x.ch === 'string' ? x.ch.slice(0, 40) : undefined, chU: typeof x.chU === 'string' ? x.chU.slice(0, 40) : undefined,
+      ch: typeof x.ch === 'string' ? x.ch.slice(0, 40) : undefined, chSig: typeof x.chSig === 'string' ? x.chSig.slice(0, 4000) : undefined, chK: typeof x.chK === 'string' ? x.chK.slice(0, 4000) : undefined, chPend: typeof x.chPend === 'string' ? x.chPend.slice(0, 4000) : undefined,
       items: items.filter(function (it) { return it && typeof it.id === 'string'; }).slice(0, 400).map(function (it) {
         var o = { id: it.id.slice(0, 80), t: TIERS.indexOf(it.t) >= 0 ? it.t : '', n: String(it.n || '').slice(0, 500), p: !!it.p };
         if (it.c) o.c = String(it.c).slice(0, 40);
@@ -248,7 +248,8 @@
 
   // ------------------------------------------------------------ shared characters (dnd.characters, STYLE 6c)
   // A character gets one spell list here holding all its spellcasting classes (multiclass). The list remembers
-  // the character (L.ch) and the character's 'updated' stamp it was last synced from (L.chU); the character's
+  // the character (L.ch), the character fields it last applied (L.chSig: edition and the rows they give), the rows
+  // as applied (L.chK, to tell whether the user changed them here) and a change waiting for the user (L.chPend). The character's
   // link links['dnd-magic'] = { list: <preferred list id> }. Syncing only changes rules, classes, levels,
   // subclasses and modifiers, never the spells, tiers or notes.
   var REPO = 'dnd-magic';
@@ -288,9 +289,20 @@
     if (x.ed !== ch.ed) { var keep = L; L = x; remapEdition(ch.ed); L = keep; x.ed = ch.ed; }
     rows.forEach(function (r) { var o = x.k.find(function (y) { return y.cls === r.cls && y.sub === r.sub; }); if (o && o.opt) r.opt = o.opt; });
     x.k = rows;
-    x.chU = ch.updated;
+    x.chSig = charSig(ch); x.chK = JSON.stringify(x.k); delete x.chPend;
     return JSON.stringify([x.ed, x.k]) !== before;
   }
+  // only the fields this site uses: edition, classes, levels, subclasses and the modifiers the scores give
+  function charSig(ch) { return JSON.stringify([ch.ed, charRows(ch)]); }
+  // the character changed: apply it, unless the user changed this list's classes by hand since (then ask)
+  function reconcile(x, ch) {
+    var sig = charSig(ch);
+    if (sig === x.chSig) return false;
+    if (x.chK && JSON.stringify(x.k) !== x.chK && x.chSig) { if (x.chPend === sig) return false; x.chPend = sig; return true; }
+    return syncList(x, ch) || true;
+  }
+  // a linked character was deleted: keep the list, drop the link quietly
+  function unlinkGone(x) { if (x.ch && !charOf(x)) { delete x.ch; delete x.chSig; delete x.chK; delete x.chPend; return true; } return false; }
   function charLists(ch) { return LS.lists.filter(function (x) { return x.ch === ch.id; }); }
   // switch to the active character's list, creating it if needed; quiet = no notices
   function useChar(ch, quiet) {
@@ -305,7 +317,7 @@
       LS.lists.push(x);
       if (!quiet) notice('Made the list "' + x.name + '" for ' + ch.name + ' (' + DC.summary(ch) + ').');
     }
-    syncList(x, ch);
+    if (x.chSig) reconcile(x, ch); else syncList(x, ch);
     L = x;
     if (link.list !== x.id) DC.setLink(ch.id, REPO, { list: x.id });
     return true;
@@ -317,8 +329,8 @@
     var changed = false;
     LS.lists.forEach(function (x) {
       var ch = charOf(x);
-      if (ch && ch.updated !== x.chU && syncList(x, ch)) changed = true;
-      else if (ch) x.chU = ch.updated;
+      if (unlinkGone(x)) changed = true;
+      else if (ch && reconcile(x, ch)) changed = true;
     });
     var aid = active ? active.id : null;
     if (aid !== lastActive) {
@@ -326,7 +338,8 @@
       store.set('dm.char', aid);
       if (active && L.ch !== aid && useChar(active)) changed = true;
     }
-    if (changed || LS.lists.some(function (x) { return x.ch && !charOf(x); })) { editing = {}; shown = PAGE; }
+    if (!changed) return;   // another site re-saved the character or its own link: nothing this site uses changed
+    editing = {}; shown = PAGE;
     saveLists();
     renderAll();
   }
@@ -347,7 +360,7 @@
     quietChars = true;
     var ch = DC.save({ name: name.trim().slice(0, 60), ed: L.ed, ab: ab,
       classes: cls.map(function (x) { return { cls: x.cls, lvl: x.lvl, sub: x.sub, subName: x.subName }; }).concat(plain), links: {} }, REPO);
-    L.ch = ch.id; L.chU = ch.updated;
+    L.ch = ch.id; L.chSig = charSig(ch); L.chK = JSON.stringify(L.k);
     saveLists();
     DC.setLink(ch.id, REPO, { list: L.id });
     lastActive = ch.id;
@@ -361,7 +374,9 @@
   function charNote() {
     var ch = charOf(L);
     if (!ch) return '';
-    return '<span class="small muted charnote">Linked to <b>' + esc(ch.name) + '</b> (' + esc(DC.summary(ch)) + '). Level-ups made on other sites update this list; changes here stay in this list.' +
+    if (L.chPend) return '<span class="small charnote charpend" role="status"><b>' + esc(ch.name) + '</b> changed on another site (now ' + esc(DC.summary(ch)) + '), but you changed the classes here. ' +
+      '<button type="button" class="btn" id="charApply">Use the character\'s classes</button> <button type="button" class="btn" id="charKeep">Keep mine</button></span>';
+    return '<span class="small muted charnote">Linked to <b>' + esc(ch.name) + '</b> (' + esc(DC.summary(ch)) + '). Level-ups made on other sites update this list; if you change the classes here, you will be asked first.' +
       ' <button type="button" class="linkish" id="unlinkChar">Unlink</button></span>';
   }
 
@@ -1055,9 +1070,17 @@
       else if (f === 'mod') { var v = parseInt(t.value, 10); if (isNaN(v)) return; r.mod = Math.max(-5, Math.min(10, v)); saveLists(); refreshCards(); }
     });
     rows.addEventListener('click', function (e) {
+      if (e.target.closest('#charApply, #charKeep')) {
+        var pch = charOf(L);
+        if (pch && e.target.closest('#charApply')) syncList(L, pch);
+        else { L.chSig = L.chPend; delete L.chPend; }
+        editing = {}; saveLists(); renderAll();
+        var cn = $('#classRows .charnote button'); if (cn) cn.focus();
+        return;
+      }
       if (e.target.closest('#unlinkChar')) {
         var och = charOf(L);
-        delete L.ch; delete L.chU;
+        delete L.ch; delete L.chSig; delete L.chK; delete L.chPend;
         if (och && (och.links[REPO] || {}).list === L.id) DC.setLink(och.id, REPO, null);
         saveLists(); renderAll(); notice('This list is no longer linked to a character.');
         return;
@@ -1089,7 +1112,7 @@
       var act = b.dataset.act, name;
       if (act === 'new') { name = prompt('Name for the new list:', 'New list'); if (name == null) return; L = newList(name.trim() || 'New list'); LS.lists.push(L); }
       else if (act === 'rename') { name = prompt('Rename this list:', L.name); if (name == null || !name.trim()) return; L.name = name.trim().slice(0, 60); }
-      else if (act === 'dup') { var d = clean(JSON.parse(JSON.stringify(L))); d.id = uid(); delete d.ch; delete d.chU; d.name = (L.name + ' (copy)').slice(0, 60); LS.lists.push(d); L = d; }
+      else if (act === 'dup') { var d = clean(JSON.parse(JSON.stringify(L))); d.id = uid(); delete d.ch; delete d.chSig; delete d.chK; delete d.chPend; d.name = (L.name + ' (copy)').slice(0, 60); LS.lists.push(d); L = d; }
       else if (act === 'clear') { if (!L.items.length || !confirm('Remove all ' + L.items.length + ' spells from "' + L.name + '"?')) return; L.items = []; }
       else if (act === 'delete') {
         if (!confirm('Delete the list "' + L.name + '"? Export first if you want a backup.')) return;
@@ -1198,6 +1221,23 @@
         }, 0);
       }
     });
+    window.addEventListener('storage', function (e) {
+      if (e.key !== 'dm.lists' || !e.newValue) return;
+      var d = store.get('dm.lists', null);
+      if (!d || !Array.isArray(d.lists) || !d.lists.length) return;
+      var cur = L.id;
+      LS = { lists: d.lists.map(clean).filter(Boolean), cur: cur };
+      L = LS.lists.find(function (x) { return x.id === cur; }) || LS.lists[0];
+      editing = {}; prepare(); renderAll();
+    });
+    // Escape closes an open menu and returns focus to its button
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      var d = e.target.closest && e.target.closest('details[open]') || $('details.srcpick[open], details.pmenu[open]');
+      if (!d) return;
+      d.open = false;
+      var sm = d.querySelector('summary'); if (sm) sm.focus();
+    });
     $('#groups').addEventListener('pointerdown', startDrag);
     $('#groups').addEventListener('keydown', function (e) {
       var h = e.target.closest('[data-drag]');
@@ -1265,7 +1305,8 @@
     var hadShare = /#list=/.test(location.hash);
     readShare();
     if (DC) {
-      LS.lists.forEach(function (x) { var ch = charOf(x); if (ch && ch.updated !== x.chU) syncList(x, ch); });
+      LS.lists.forEach(function (x) { var ch = charOf(x); if (!unlinkGone(x) && ch) reconcile(x, ch); });
+      if (window.DM_CHAR_Q && !DC.get(window.DM_CHAR_Q)) notice("That character isn't in this browser. Characters are saved per browser; make it here or in the Multiclass Planner.");
       var act = DC.active();
       lastActive = act ? act.id : null;
       // switch to the character's list; make one only for a character this site has not seen active before
