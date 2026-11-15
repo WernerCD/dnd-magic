@@ -440,10 +440,17 @@ a.srctag:hover { text-decoration: underline; }
 .spell-filters .srcpick { position: relative; }
 .spell-filters .srcpop { left: 0; right: auto; width: min(300px, calc(100vw - 32px)); }
 .spell-filters #srcPick .srcpop { width: min(340px, calc(100vw - 32px)); }
+/* the user's own star ratings */
+.stars { display: inline-flex; align-items: center; }
+.star { font: inherit; font-size: 1.05rem; line-height: 1; border: 0; background: none; color: var(--gold); padding: 2px 1px; min-width: 22px; min-height: 26px; cursor: pointer; border-radius: 4px; }
+.star[aria-checked="false"] { color: color-mix(in srgb, var(--gold) 70%, var(--muted)); }
+.star:hover { background: var(--surface-2); }
+.t-rate { color: var(--gold); border-color: var(--gold); }
+.drate { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-bottom: 8px; }
 .pfacts, .ptier { display: none; }
 .row .nm, .card .nm, .linkish { min-height: 24px; }
 @media print {
-  .build-bar, .tabs, .browse, .about, #notice, .mine-help, .handle, .row-btns, .tier, .prep, .rcls, .rnote-edit, #rulesNotes { display: none !important; }
+  .build-bar, .tabs, .browse, .about, #notice, .mine-help, .handle, .row-btns, .tier, .prep, .rcls, .stars, .rnote-edit, #rulesNotes { display: none !important; }
   .layout { display: block; }
   .mine, body.show-mine .mine { display: block !important; position: static; }
   .mine-inner { max-height: none; overflow: visible; border: 0; box-shadow: none; padding: 0; }

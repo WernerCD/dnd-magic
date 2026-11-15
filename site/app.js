@@ -25,7 +25,7 @@
   var shown = PAGE, editing = {}, lastRows = [];
 
   function defaults() {
-    return { q: '', lv: [], sch: [], time: [], comp: [], props: [], dmg: [], save: [], books: null, scope: 'class', only: '',
+    return { q: '', lv: [], sch: [], time: [], comp: [], props: [], dmg: [], save: [], books: null, scope: 'class', only: '', rate: [],
       castable: false, hidePicked: false, opt: true, view: store.get('dm.view', 'stats'), sort: 'level' };
   }
   function lvName(n) { return n === 0 ? 'Cantrip' : 'Level ' + n; }
@@ -194,7 +194,50 @@
     return out;
   }
   var lastSaved = null;   // the dm.lists text this tab last read or wrote: anything else came from another tab
-  function saveLists() { LS.cur = L.id; store.set('dm.lists', LS); lastSaved = rawLists(); }
+  function saveLists() { LS.cur = L.id; store.set('dm.lists', LS); lastSaved = rawLists(); pushShares(); }
+  // what a character's share link carries for this site: its list (notes dropped if needed, nothing if still too long)
+  var SHARE_CHAR_MAX = 6000, pushing = false;
+  function sharePayload(x) {
+    var c = listPayload(x, true);
+    if (JSON.stringify(c).length > SHARE_CHAR_MAX) c = listPayload(x, false);
+    return JSON.stringify(c).length > SHARE_CHAR_MAX ? null : c;
+  }
+  function pushShares() {
+    if (!DC || pushing) return;
+    pushing = true; var q = quietChars; quietChars = true;
+    try {
+      DC.all().forEach(function (ch) {
+        var mine = charLists(ch), link = ch.links[REPO] || {};
+        var x = mine.find(function (y) { return y.id === link.list; }) || mine[0];
+        if (x) DC.setShare(ch.id, REPO, sharePayload(x));
+        else if (ch.share && ch.share[REPO] != null) DC.setShare(ch.id, REPO, null);
+      });
+    } finally { quietChars = q; pushing = false; }
+  }
+  // a share link brought a list for this character: link it, without overwriting a different list of the user's
+  function takeShared(ch) {
+    if (!DC || !ch) return false;
+    var q = quietChars; quietChars = true;
+    var data; try { data = DC.takeInbox(ch.id, REPO); } finally { quietChars = q; }
+    if (!data || typeof data !== 'object') return false;
+    var x; try { x = listFromPayload(data); } catch (e) { return false; }
+    x.ch = ch.id;
+    if (charRows(ch).length) syncList(x, ch);
+    var mine = charLists(ch), same = mine.find(function (y) { return listSig(y) === listSig(x); });
+    if (same) { L = same; notice('The list shared with ' + ch.name + ' is the same as yours, so nothing changed.'); return true; }
+    if (!mine.length) {
+      x.name = (ch.name + "'s spells").slice(0, 60);
+      if (LS.lists.length === 1 && !LS.lists[0].items.length && !LS.lists[0].ch) LS.lists = [];
+      LS.lists.push(x); L = x;
+      var q2 = quietChars; quietChars = true; try { DC.setLink(ch.id, REPO, { list: x.id }); } finally { quietChars = q2; }
+      notice('Added ' + ch.name + "'s shared spell list (" + x.items.length + ' spells).');
+    } else {
+      x.name = (ch.name + "'s spells (shared)").slice(0, 60);
+      LS.lists.push(x); L = x;
+      notice('Added the list shared with ' + ch.name + ' as "' + x.name + '". Your own list is still in My lists.');
+    }
+    return true;
+  }
   function rawLists() { try { return localStorage.getItem('dm.lists'); } catch (e) { return null; } }
   function loadLists() {
     var d = store.get('dm.lists', null);
@@ -225,12 +268,28 @@
       ed: x.ed === '2014' ? '2014' : '2024',
       k: k,
       ch: typeof x.ch === 'string' ? x.ch.slice(0, 40) : undefined, chSig: typeof x.chSig === 'string' ? x.chSig.slice(0, 4000) : undefined, chK: typeof x.chK === 'string' ? x.chK.slice(0, 4000) : undefined, chPend: typeof x.chPend === 'string' ? x.chPend.slice(0, 4000) : undefined,
+      rt: cleanRt(x.rt),
       items: items.filter(function (it) { return it && typeof it.id === 'string'; }).slice(0, 400).map(function (it) {
         var o = { id: it.id.slice(0, 80), t: TIERS.indexOf(it.t) >= 0 ? it.t : '', n: String(it.n || '').slice(0, 500), p: !!it.p };
         if (it.c) o.c = String(it.c).slice(0, 40);
         return o;
       })
     };
+  }
+  function cleanRt(rt) {
+    var out = {};
+    if (rt && typeof rt === 'object') Object.keys(rt).slice(0, 1000).forEach(function (id) { var v = parseInt(rt[id], 10); if (v >= 1 && v <= 5) out[String(id).slice(0, 80)] = v; });
+    return out;
+  }
+  // the user's own 1-5 star rating of a spell, kept with the list (0 = not rated)
+  function rating(id) { return (L.rt && L.rt[id]) || 0; }
+  function setRating(id, v) { if (!L.rt) L.rt = {}; if (v) L.rt[id] = v; else delete L.rt[id]; saveLists(); }
+  function starsHtml(id, name) {
+    var n = rating(id);
+    return '<span class="stars" role="radiogroup" aria-label="My rating for ' + esc(name) + '">' + [1, 2, 3, 4, 5].map(function (k) {
+      return '<button type="button" role="radio" class="star" data-rate="' + id + '" data-v="' + k + '" aria-checked="' + (n === k) + '" tabindex="' + ((n ? n === k : k === 1) ? 0 : -1) + '"' +
+        ' aria-label="' + k + ' star' + (k > 1 ? 's' : '') + '" title="' + (n === k ? 'Click again to clear' : k + ' of 5') + '">' + (k <= n ? '\u2605' : '\u2606') + '</button>';
+    }).join('') + '</span>';
   }
   function has(id) { return L.items.some(function (it) { return it.id === id; }); }
   function addSpell(id) { if (!has(id)) { L.items.push({ id: id, t: '', n: '', p: false }); saveLists(); } }
@@ -247,6 +306,13 @@
     });
     var seen = {};
     L.items = L.items.filter(function (it) { if (seen[it.id]) return false; seen[it.id] = 1; return true; });
+    var rt = {};
+    Object.keys(L.rt || {}).forEach(function (id) {
+      var s = SP[id], c = s ? (BYNAME[norm(s.name)] || []).filter(function (x) { return ed === '2014' ? x.ed === '2014' : (x.ed === '2024' || x.legacy); }) : [];
+      c.sort(function (a, b) { return (a.ed === ed ? 0 : 1) - (b.ed === ed ? 0 : 1); });
+      rt[c[0] ? c[0].id : id] = L.rt[id];
+    });
+    L.rt = rt;
   }
 
   // ------------------------------------------------------------ shared characters (dnd.characters, STYLE 6c)
@@ -360,6 +426,7 @@
       else if (ch && reconcile(x, ch)) changed = true;
     });
     var aid = active ? active.id : null;
+    if (active && takeShared(active)) changed = true;
     if (aid !== lastActive) {
       lastActive = aid;
       store.set('dm.char', aid);
@@ -419,28 +486,38 @@
     return new TextDecoder().decode(bytes);
   }
   var SHARE_MAX = 8000;   // longer links break in some chat apps and browsers
-  function shareUrl() {
-    var c = { v: 2, n: L.name, e: L.ed, k: L.k.map(function (r) { return [r.cls === OTHER && r.nm ? OTHER + ':' + r.nm : r.cls, r.sub, r.opt, r.lvl, r.mod]; }),
-      i: L.items.map(function (it) {
-        var r = [it.id, it.t, it.n, it.p ? 1 : 0, it.c || ''];
+  // a list as compact JSON: v, n name, e rules, k class rows, i [id, tier, note, prepared, class], r [[id, stars]]
+  function listPayload(x, notes) {
+    var c = { v: 3, n: x.name, e: x.ed, k: x.k.map(function (r) { return [r.cls === OTHER && r.nm ? OTHER + ':' + r.nm : r.cls, r.sub, r.opt, r.lvl, r.mod]; }),
+      i: x.items.map(function (it) {
+        var r = [it.id, it.t, notes ? it.n : '', it.p ? 1 : 0, it.c || ''];
         while (r.length > 1 && !r[r.length - 1]) r.pop();
         return r;
       }) };
-    return location.origin + location.pathname + '#list=' + b64e(JSON.stringify(c));
+    var rt = Object.keys(x.rt || {});
+    if (rt.length) c.r = rt.map(function (id) { return [id, x.rt[id]]; });
+    return c;
   }
+  function listFromPayload(c) {
+    var k = Array.isArray(c.k) ? c.k.map(function (r) { return { cls: r[0], sub: r[1], opt: r[2], lvl: r[3], mod: r[4] }; })
+      : [{ cls: c.c, sub: c.s, opt: c.o, lvl: c.l, mod: c.m }];
+    var rt = {};
+    (Array.isArray(c.r) ? c.r : []).forEach(function (r) { if (Array.isArray(r)) rt[r[0]] = r[1]; });
+    var x = clean({ name: c.n, ed: c.e, k: k, rt: rt,
+      items: (Array.isArray(c.i) ? c.i : []).map(function (r) { return Array.isArray(r) ? { id: r[0], t: r[1], n: r[2], p: r[3], c: r[4] } : null; }).filter(Boolean) });
+    x.id = uid();
+    return x;
+  }
+  function listSig(x) { return JSON.stringify([x.items.map(function (it) { return [it.id, it.t, it.n, it.p]; }), x.rt || {}]); }
+  function shareUrl() { return location.origin + location.pathname + '#list=' + b64e(JSON.stringify(listPayload(L, true))); }
   function readShare() {
     var m = /#list=([A-Za-z0-9_-]+)/.exec(location.hash);
     if (!m) return;
     history.replaceState(null, '', location.pathname + location.search);
     try {
-      var c = JSON.parse(b64d(m[1]));
-      var k = Array.isArray(c.k) ? c.k.map(function (r) { return { cls: r[0], sub: r[1], opt: r[2], lvl: r[3], mod: r[4] }; })
-        : [{ cls: c.c, sub: c.s, opt: c.o, lvl: c.l, mod: c.m }];
-      var x = clean({ name: c.n, ed: c.e, k: k,
-        items: (c.i || []).map(function (r) { return { id: r[0], t: r[1], n: r[2], p: r[3], c: r[4] }; }) });
-      x.id = uid();
-      var sig = JSON.stringify([x.ed, x.k, x.items]);
-      var same = LS.lists.find(function (y) { return JSON.stringify([y.ed, y.k, y.items]) === sig; });
+      var x = listFromPayload(JSON.parse(b64d(m[1])));
+      var sig = JSON.stringify([x.ed, x.k, x.items, x.rt]);
+      var same = LS.lists.find(function (y) { return JSON.stringify([y.ed, y.k, y.items, y.rt]) === sig; });
       if (same) { L = same; notice('That shared list is already saved as "' + same.name + '".'); }
       else {
         x.name = x.name + ' (shared)';
@@ -497,7 +574,7 @@
       if (v === 'yes' || v === 'no') F.props.push(k === 'conc' ? (v === 'yes' ? 'conc' : 'noconc') : (v === 'yes' ? 'rit' : 'norit'));
       else if (v) bad.push(k + '=' + v);
     });
-    if (p.get('sort')) { if (['level', 'name', 'school', 'src'].indexOf(p.get('sort')) >= 0) F.sort = p.get('sort'); else bad.push('sort=' + p.get('sort')); }
+    if (p.get('sort')) { if (['level', 'name', 'school', 'src', 'rate'].indexOf(p.get('sort')) >= 0) F.sort = p.get('sort'); else bad.push('sort=' + p.get('sort')); }
     if (p.get('books') && p.get('books') !== 'all') {
       var bk = p.get('books').split(',');
       F.books = bk.filter(function (k) { return DATA.books[k]; });
@@ -703,6 +780,9 @@
     { k: 'dmg', p: 'dmg', label: 'Damage', mode: 'any', hint: 'Spells that deal any ticked damage type.',
       opts: function () { var d = {}; POOL.forEach(function (s) { (s.dmg || []).forEach(function (x) { d[x] = 1; }); }); return Object.keys(d).sort().map(function (x) { return [x, cap(x)]; }); },
       test: function (s, v) { return !!s.dmg && s.dmg.indexOf(v) >= 0; } },
+    { k: 'rate', p: 'rate', label: 'My rating', mode: 'any', hint: 'Your own ratings in this list. Tick 5 and 4 for "4 stars or more".',
+      opts: function () { return [['5', '5 stars', '5\u2605'], ['4', '4 stars', '4\u2605'], ['3', '3 stars', '3\u2605'], ['2', '2 stars', '2\u2605'], ['1', '1 star', '1\u2605'], ['0', 'Not rated']]; },
+      test: function (s, v) { return rating(s.id) === +v; } },
     { k: 'save', p: 'save', label: 'Save or attack', mode: 'any', hint: 'Spells that use any ticked save or a spell attack.',
       opts: function () { return SAVES.map(function (a) { return [a, a + ' save', a.slice(0, 3) + ' save']; }).concat([['atk', 'Spell attack']]); },
       test: function (s, v) { return v === 'atk' ? !!s.atk : !!s.save && s.save.indexOf(v) >= 0; } }
@@ -753,6 +833,8 @@
       if (q) { var ax = norm(x.name).indexOf(q) === 0 ? 0 : 1, by = norm(y.name).indexOf(q) === 0 ? 0 : 1; if (ax !== by) return ax - by; }
       if (F.sort === 'level' && x.lvl !== y.lvl) return x.lvl - y.lvl;
       if (F.sort === 'school' && x.school !== y.school) return x.school < y.school ? -1 : 1;
+      if (F.sort === 'rate' && rating(x.id) !== rating(y.id)) return rating(y.id) - rating(x.id);
+      if (F.sort === 'rate' && x.lvl !== y.lvl) return x.lvl - y.lvl;
       if (F.sort === 'src' && x.src !== y.src) return DATA.books[x.src].name < DATA.books[y.src].name ? -1 : 1;
       return x.name < y.name ? -1 : x.name > y.name ? 1 : 0;
     });
@@ -841,7 +923,7 @@
     var h = '<article class="card' + (tooHigh ? ' locked' : '') + (m.on ? '' : ' off-list') + '" data-id="' + s.id + '" style="--h:' + SCH_HUE[s.school] + '">';
     h += '<div class="card-top"><h3><button type="button" class="linkish nm" data-open="' + s.id + '">' + esc(s.name) + '</button></h3><span class="cr" title="' + lvName(s.lvl) + '">' + lvShort(s.lvl) + '</span></div>';
     h += '<div class="meta">' + esc(lineFor(s)) + (F.view === 'basic' ? ' &middot; ' + esc(s.time) : '') + '</div>';
-    h += '<div class="pills">' + tagsFor(s, m) + srcTag(s) + (m.on || F.scope !== 'all' ? '' : '<span class="tag t-off" title="Not on your class list">Not on your list</span>') + '</div>';
+    h += '<div class="pills">' + (rating(s.id) ? '<span class="tag t-rate" title="My rating: ' + rating(s.id) + ' of 5">' + rating(s.id) + ' \u2605</span>' : '') + tagsFor(s, m) + srcTag(s) + (m.on || F.scope !== 'all' ? '' : '<span class="tag t-off" title="Not on your class list">Not on your list</span>') + '</div>';
     if (F.view !== 'basic') {
       h += '<dl class="facts cfacts">' + factsHtml(s).map(function (x) { return '<dt>' + x[0] + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl>';
     }
@@ -968,7 +1050,8 @@
     h += '<span class="row-main"><button type="button" class="linkish nm" data-open="' + sp.id + '">' + nm + '</button>' + (sp.conc ? '<span class="tag t-conc" title="Concentration">C</span>' : '') + (sp.ritual ? '<span class="tag t-rit" title="Ritual">R</span>' : '') +
       (tooHigh ? '<span class="small muted"> (later)</span>' : '') + (it.t ? '<span class="ptier">' + it.t + '</span>' : '') + (it.p ? '<span class="ptier">Prepared</span>' : '') +
       (multi || !X ? '<span class="ptier">' + (X ? esc(X.label) : 'Other') + '</span>' : '') +
-      (why ? '<span class="tag t-sub" title="Does not count against your known or prepared spells">' + esc(why) + '</span>' : '') + '</span>' + pfacts(sp);
+      (why ? '<span class="tag t-sub" title="Does not count against your known or prepared spells">' + esc(why) + '</span>' : '') +
+      (rating(sp.id) ? '<span class="ptier">' + rating(sp.id) + ' \u2605</span>' : '') + '</span>' + starsHtml(sp.id, sp.name) + pfacts(sp);
     if (X && X.P.book != null && sp.lvl > 0) h += '<label class="prep" title="Prepared today"><input type="checkbox" data-prep="' + sp.id + '"' + (it.p ? ' checked' : '') + '> P</label>';
     if (multi || !m.on || it.c) {
       h += '<select class="rcls" data-rcls="' + sp.id + '" aria-label="Class ' + nm + ' counts for" title="Which class this spell counts for">' +
@@ -1065,6 +1148,7 @@
       h += '<p class="wsnote">This spell is not in the free System Reference Document, so only its facts are listed. Its rules text is in <b>' + esc(DATA.books[s.src].name) + '</b>' + (s.page ? ', page ' + s.page : '') + '.</p>';
     }
     h += '<div class="mynotes">';
+    h += '<div class="drate"><span class="ctl-label" id="dRateL">My rating</span>' + starsHtml(id, s.name) + '<span class="small muted">' + (rating(id) ? 'Saved with "' + esc(L.name) + '"' : 'Not rated') + '</span></div>';
     if (on) {
       h += '<label for="dTier">Tier</label><select id="dTier" data-tier="' + id + '"><option value="">No tier</option>' + TIERS.map(function (t) { return '<option value="' + t + '"' + (it.t === t ? ' selected' : '') + '>' + TIER_NAME[t] + '</option>'; }).join('') + '</select>';
       h += '<label for="dNote">My note</label><textarea id="dNote" data-noteedit="' + id + '" rows="3" maxlength="500" placeholder="Why this spell? When to use it?">' + esc(it.n) + '</textarea>';
@@ -1073,6 +1157,16 @@
     $('#dBody').innerHTML = h;
     if (!dlg.open) dlg.showModal();
     writeUrl();
+  }
+
+  // set a rating from a star button and keep the focus on the same star group
+  function rateTo(btn, v) {
+    var id = btn.dataset.rate, inDlg = !!btn.closest('#detail'), y = window.scrollY;
+    setRating(id, v);
+    renderList(); renderMine(); window.scrollTo(0, y);
+    if (inDlg && $('#detail').open) openSpell(id);
+    var box = inDlg ? '#dBody' : '#groups', f = $(box + ' [data-rate="' + id + '"][data-v="' + (v || 1) + '"]');
+    if (f) f.focus();
   }
 
   // ------------------------------------------------------------ render all
@@ -1223,6 +1317,7 @@
         else { var nb = $('#list [data-add="' + id + '"]'); if (nb) nb.focus(); }
         return;
       }
+      if ((t = e.target.closest('[data-rate]'))) { var rv = +t.dataset.v; rateTo(t, rating(t.dataset.rate) === rv ? 0 : rv); return; }
       if ((t = e.target.closest('[data-open]'))) { openSpell(t.dataset.open); return; }
       if ((t = e.target.closest('#list .card')) && !e.target.closest('button, a, select, input, textarea, label')) { openSpell(t.dataset.id); return; }
       if ((t = e.target.closest('[data-mv]'))) {
@@ -1286,6 +1381,20 @@
     window.addEventListener('storage', function (e) {
       if (e.key !== 'dm.lists' || !e.newValue) return;
       if (reloadLists()) { keepFocus(renderAll); }
+    });
+    // stars: arrow keys move the rating, Delete or 0 clears it
+    document.addEventListener('keydown', function (e) {
+      var t = e.target.closest && e.target.closest('[data-rate]');
+      if (!t) return;
+      var n = rating(t.dataset.rate), v = null;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowUp') v = Math.min(5, n + 1);
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') v = Math.max(1, n - 1);
+      else if (e.key === 'Home') v = 1; else if (e.key === 'End') v = 5;
+      else if (e.key === 'Delete' || e.key === 'Backspace' || e.key === '0') v = 0;
+      else if (/^[1-5]$/.test(e.key)) v = +e.key;
+      if (v == null) return;
+      e.preventDefault();
+      rateTo(t, v);
     });
     // Escape closes an open menu and returns focus to its button
     document.addEventListener('keydown', function (e) {
@@ -1366,6 +1475,7 @@
       if (window.DM_CHAR_Q && !DC.get(window.DM_CHAR_Q)) notice("That character isn't in this browser. Characters are saved per browser; make it here or in the Multiclass Planner.");
       var act = DC.active();
       lastActive = act ? act.id : null;
+      if (act && takeShared(act)) hadShare = true;
       // switch to the character's list; make one only for a character this site has not seen active before
       // (so a list the user unlinked does not come back on the next visit)
       if (act && !hadShare && L.ch !== act.id && (charLists(act).length || store.get('dm.char', null) !== act.id)) useChar(act, true);
