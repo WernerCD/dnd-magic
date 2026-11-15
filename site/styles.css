@@ -364,7 +364,6 @@ a.srctag:hover { text-decoration: underline; }
 
 .spell-filters { margin: 4px 0 0; }
 .spell-filters input[type=search] { flex: 1 1 200px; min-width: 0; }
-#lvlChips .chip { min-width: 34px; padding: 4px 8px; text-align: center; }
 .schip { color: hsl(var(--h) var(--src-s) var(--src-l)); }
 .schip[aria-pressed="true"] { background: hsl(var(--h) 45% var(--src-bg)); border-color: hsl(var(--h) var(--src-s) var(--src-l)); color: hsl(var(--h) var(--src-s) var(--src-l)); }
 .card .add { top: 8px; right: 8px; border: 1px solid var(--line); border-radius: 8px; width: 32px; height: 32px; display: grid; place-items: center; background: var(--surface); }
@@ -432,6 +431,13 @@ a.srctag:hover { text-decoration: underline; }
   .rnote, .rnote-edit { margin-left: 0; max-width: 100%; }
   .spell-filters select { flex: 1 1 140px; }
 }
+/* tick-box filter menus: each opens under its own button (app.js keeps it on screen) */
+.menus { display: contents; }
+.srcrow.zero { opacity: .5; }
+.mhint { margin: 0 0 4px; }
+.spell-filters .srcpick { position: relative; }
+.spell-filters .srcpop { left: 0; right: auto; width: min(300px, calc(100vw - 32px)); }
+.spell-filters #srcPick .srcpop { width: min(340px, calc(100vw - 32px)); }
 .pfacts, .ptier { display: none; }
 .row .nm, .card .nm, .linkish { min-height: 24px; }
 @media print {

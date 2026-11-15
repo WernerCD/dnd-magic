@@ -25,7 +25,7 @@
   var shown = PAGE, editing = {}, lastRows = [];
 
   function defaults() {
-    return { q: '', lv: [], sch: [], time: '', conc: '', rit: '', dmg: '', save: '', books: null, scope: 'class', only: '',
+    return { q: '', lv: [], sch: [], time: [], comp: [], props: [], dmg: [], save: [], books: null, scope: 'class', only: '',
       castable: false, hidePicked: false, opt: true, view: store.get('dm.view', 'stats'), sort: 'level' };
   }
   function lvName(n) { return n === 0 ? 'Cantrip' : 'Level ' + n; }
@@ -441,9 +441,10 @@
   function readUrl() {
     var p = new URLSearchParams(location.search);
     if (p.get('q')) F.q = p.get('q');
-    if (p.get('lv')) F.lv = p.get('lv').split(',').map(Number).filter(function (n) { return n >= 0 && n <= 9; });
-    if (p.get('school')) F.sch = p.get('school').split(',').filter(function (s) { return SCHOOLS.indexOf(s) >= 0; });
-    ['time', 'conc', 'rit', 'dmg', 'save', 'sort'].forEach(function (k) { if (p.get(k)) F[k] = p.get(k); });
+    MENUS.forEach(function (M) { if (p.get(M.p)) F[M.k] = p.get(M.p).split(',').filter(Boolean).slice(0, 20); });
+    if (p.get('conc') === 'yes' || p.get('conc') === 'no') F.props.push(p.get('conc') === 'yes' ? 'conc' : 'noconc');
+    if (p.get('rit') === 'yes' || p.get('rit') === 'no') F.props.push(p.get('rit') === 'yes' ? 'rit' : 'norit');
+    if (p.get('sort')) F.sort = p.get('sort');
     if (p.get('books')) F.books = p.get('books') === 'all' ? null : p.get('books').split(',');
     if (p.get('scope') === 'all') F.scope = 'all';
     if (p.get('only')) F.only = p.get('only');
@@ -456,9 +457,7 @@
   function writeUrl() {
     var p = new URLSearchParams();
     if (F.q) p.set('q', F.q);
-    if (F.lv.length) p.set('lv', F.lv.join(','));
-    if (F.sch.length) p.set('school', F.sch.join(','));
-    ['time', 'conc', 'rit', 'dmg', 'save'].forEach(function (k) { if (F[k]) p.set(k, F[k]); });
+    MENUS.forEach(function (M) { if (F[M.k].length) p.set(M.p, F[M.k].join(',')); });
     if (F.sort !== 'level') p.set('sort', F.sort);
     if (F.books) p.set('books', F.books.join(','));
     if (F.scope === 'all') p.set('scope', 'all');
@@ -610,34 +609,83 @@
     POOL = pool(); CTX = contexts(); COMBO = combine(CTX);
   }
   function passBase(s, m) {
-    if (F.scope === 'class' && !m.on) return false;
-    if (F.books && F.books.indexOf(s.src) < 0) return false;
-    return true;
+    return !(F.scope === 'class' && !m.on);
   }
-  function passFilters(s, m) {
+  function passFilters(s, m, skip) {
     if (F.q && norm(s.name).indexOf(norm(F.q)) < 0) return false;
-    if (F.lv.length && F.lv.indexOf(s.lvl) < 0) return false;
-    if (F.sch.length && F.sch.indexOf(s.school) < 0) return false;
-    if (F.time && s.tcat !== F.time) return false;
-    if (F.conc && !!s.conc !== (F.conc === 'yes')) return false;
-    if (F.rit && !!s.ritual !== (F.rit === 'yes')) return false;
-    if (F.dmg && (!s.dmg || s.dmg.indexOf(F.dmg) < 0)) return false;
-    if (F.save) {
-      if (F.save === 'atk') { if (!s.atk) return false; }
-      else if (!s.save || s.save.indexOf(F.save) < 0) return false;
-    }
+    if (skip !== 'books' && F.books && F.books.indexOf(s.src) < 0) return false;
+    for (var i = 0; i < MENUS.length; i++) if (MENUS[i].k !== skip && !menuOK(MENUS[i], s)) return false;
     if (F.castable && s.lvl > 0 && s.lvl > learnMax(m)) return false;
     if (F.castable && s.lvl === 0 && !hasCantrips(m)) return false;
     if (F.only && F.scope === 'class' && !m.by.some(function (x) { return x.key === F.only; })) return false;
     if (F.hidePicked && has(s.id)) return false;
     return true;
   }
+  // tick-box filter menus. any = a spell matches one ticked option; all = it must match every ticked option.
+  // Counts are faceted: each follows every other filter.
+  var SAVES = ['Strength', 'Dexterity', 'Constitution', 'Intelligence', 'Wisdom', 'Charisma'];
+  var MENUS = [
+    { k: 'lv', p: 'lv', label: 'Level', mode: 'any', hint: 'Spells of any ticked level.',
+      opts: function () { return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (n) { return [String(n), lvName(n), n === 0 ? 'Cantrip' : String(n)]; }); },
+      test: function (s, v) { return s.lvl === +v; } },
+    { k: 'sch', p: 'school', label: 'School', mode: 'any', hint: 'Spells of any ticked school.',
+      opts: function () { return SCHOOLS.map(function (x) { return [x, x]; }); },
+      test: function (s, v) { return s.school === v; } },
+    { k: 'time', p: 'time', label: 'Casting time', mode: 'any', hint: 'Any ticked casting time.',
+      opts: function () { return [['action', 'Action'], ['bonus', 'Bonus action'], ['reaction', 'Reaction'], ['long', '1 minute or longer', '1 min+']]; },
+      test: function (s, v) { return s.tcat === v; } },
+    { k: 'comp', p: 'comp', label: 'Components', mode: 'all', hint: 'Every ticked line must match (Subtle Spell, a bound caster, no focus...).',
+      opts: function () { return [['nov', 'No verbal (V)', 'no V'], ['nos', 'No somatic (S)', 'no S'], ['nom', 'No material (M)', 'no M'], ['nocost', 'No costly material', 'no costly M']]; },
+      test: function (s, v) { var c = ', ' + s.comp + ','; return v === 'nov' ? c.indexOf(' V,') < 0 : v === 'nos' ? c.indexOf(' S,') < 0 : v === 'nom' ? c.indexOf(' M,') < 0 : !s.mcost; } },
+    { k: 'props', p: 'props', label: 'Concentration, ritual', mode: 'all', hint: 'Every ticked line must match.',
+      opts: function () { return [['conc', 'Concentration'], ['noconc', 'No concentration'], ['rit', 'Ritual'], ['norit', 'Not a ritual']]; },
+      test: function (s, v) { return v === 'conc' ? !!s.conc : v === 'noconc' ? !s.conc : v === 'rit' ? !!s.ritual : !s.ritual; } },
+    { k: 'dmg', p: 'dmg', label: 'Damage', mode: 'any', hint: 'Spells that deal any ticked damage type.',
+      opts: function () { var d = {}; POOL.forEach(function (s) { (s.dmg || []).forEach(function (x) { d[x] = 1; }); }); return Object.keys(d).sort().map(function (x) { return [x, cap(x)]; }); },
+      test: function (s, v) { return !!s.dmg && s.dmg.indexOf(v) >= 0; } },
+    { k: 'save', p: 'save', label: 'Save or attack', mode: 'any', hint: 'Spells that use any ticked save or a spell attack.',
+      opts: function () { return SAVES.map(function (a) { return [a, a + ' save', a.slice(0, 3) + ' save']; }).concat([['atk', 'Spell attack']]); },
+      test: function (s, v) { return v === 'atk' ? !!s.atk : !!s.save && s.save.indexOf(v) >= 0; } }
+  ];
+  function menuOK(M, s, extra) {
+    var vals = F[M.k];
+    if (extra != null) vals = M.mode === 'all' ? vals.concat([extra]) : [extra];
+    if (!vals.length) return true;
+    return M.mode === 'all' ? vals.every(function (v) { return M.test(s, v); }) : vals.some(function (v) { return M.test(s, v); });
+  }
+  var BASE = [];   // the pool after the class-list scope, with membership: what every count starts from
+  function renderMenus() {
+    var act = document.activeElement, focusSel = act && act.dataset && act.dataset.mk ? '[data-mk="' + act.dataset.mk + '"][data-mo="' + act.dataset.mo + '"]' : null;
+    MENUS.forEach(function (M) {
+      var opts = M.opts(), on = [];
+      var rest = BASE.filter(function (r) { return passFilters(r.s, r.m, M.k); });
+      F[M.k] = F[M.k].filter(function (v) { return opts.some(function (o) { return o[0] === v; }); });
+      $('#mList-' + M.k).innerHTML = opts.map(function (o) {
+        var ticked = F[M.k].indexOf(o[0]) >= 0;
+        if (ticked) on.push(o[2] || o[1]);
+        var n = rest.filter(function (r) { return menuOK(M, r.s, o[0]); }).length;
+        return '<label class="srcrow' + (n || ticked ? '' : ' zero') + '"><input type="checkbox" data-mk="' + M.k + '" data-mo="' + esc(o[0]) + '"' + (ticked ? ' checked' : '') + '><span>' + esc(o[1]) + '</span><span class="n">' + n + '</span></label>';
+      }).join('');
+      $('#mSum-' + M.k).textContent = on.length ? M.label + ': ' + (on.length > 2 ? on.length + ' picked' : on.join(M.mode === 'all' ? ', ' : ' or ')) : M.label;
+      $('#mPick-' + M.k).classList.toggle('filtered', on.length > 0);
+    });
+    if (focusSel && !document.activeElement.closest('.srcpop')) { var f = $(focusSel); if (f) f.focus(); }
+  }
+  function buildMenus() {
+    $('#menus').innerHTML = MENUS.map(function (M) {
+      return '<details class="srcpick fpick" id="mPick-' + M.k + '"><summary id="mSum-' + M.k + '">' + esc(M.label) + '</summary><div class="srcpop">' +
+        '<div class="srcbtns"><button type="button" data-mclear="' + M.k + '">Clear all</button></div><p class="small muted mhint">' + esc(M.hint) + '</p>' +
+        '<div class="srclist" id="mList-' + M.k + '"></div></div></details>';
+    }).join('');
+  }
   function results() {
     var out = [];
+    BASE = [];
     POOL.forEach(function (s) {
       var m = membership(s);
-      if (!passBase(s, m) || !passFilters(s, m)) return;
-      out.push({ s: s, m: m });
+      if (!passBase(s, m)) return;
+      BASE.push({ s: s, m: m });
+      if (passFilters(s, m)) out.push({ s: s, m: m });
     });
     var q = norm(F.q);
     out.sort(function (a, b) {
@@ -658,27 +706,14 @@
     $('#onlyCls').hidden = CTX.length < 2 || F.scope !== 'class';
     $('#onlyCls').innerHTML = '<option value="">All my classes</option>' + CTX.map(function (x) { return '<option value="' + esc(x.key) + '"' + (F.only === x.key ? ' selected' : '') + '>' + esc(x.label) + ' list</option>'; }).join('');
     $$('[data-detail]').forEach(function (b) { b.setAttribute('aria-checked', String(b.dataset.detail === F.view)); });
-    $('#lvlChips').innerHTML = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (n) {
-      return '<button type="button" class="chip" data-lv="' + n + '" aria-pressed="' + (F.lv.indexOf(n) >= 0) + '" title="' + lvName(n) + '">' + (n === 0 ? 'C' : n) + '</button>';
-    }).join('');
-    $('#schChips').innerHTML = SCHOOLS.map(function (s) {
-      return '<button type="button" class="chip schip" style="--h:' + SCH_HUE[s] + '" data-sch="' + s + '" aria-pressed="' + (F.sch.indexOf(s) >= 0) + '">' + s + '</button>';
-    }).join('');
-    $('#schSum').textContent = F.sch.length ? (F.sch.length === 1 ? F.sch[0] : F.sch.length + ' schools') : 'School';
-    $('#schPick').classList.toggle('filtered', !!F.sch.length);
-    ['time', 'conc', 'rit', 'sort'].forEach(function (k) { $('#' + k).value = F[k]; });
-    var dm = {};
-    POOL.forEach(function (s) { (s.dmg || []).forEach(function (d) { dm[d] = 1; }); });
-    $('#dmg').innerHTML = '<option value="">Any damage type</option>' + Object.keys(dm).sort().map(function (d) { return '<option value="' + d + '"' + (F.dmg === d ? ' selected' : '') + '>' + d[0].toUpperCase() + d.slice(1) + ' damage</option>'; }).join('');
-    $('#save').innerHTML = '<option value="">Any save or attack</option>' + ['Strength', 'Dexterity', 'Constitution', 'Intelligence', 'Wisdom', 'Charisma'].map(function (a) {
-      return '<option value="' + a + '"' + (F.save === a ? ' selected' : '') + '>' + a + ' save</option>';
-    }).join('') + '<option value="atk"' + (F.save === 'atk' ? ' selected' : '') + '>Spell attack</option>';
+    $('#sort').value = F.sort;
     $('#castable').checked = F.castable; $('#hidePicked').checked = F.hidePicked;
     renderSources();
   }
   function renderSources() {
     var cnt = {};
-    POOL.forEach(function (s) { cnt[s.src] = (cnt[s.src] || 0) + 1; });
+    POOL.forEach(function (s) { cnt[s.src] = 0; });
+    BASE.forEach(function (r) { if (passFilters(r.s, r.m, 'books')) cnt[r.s.src]++; });
     var codes = Object.keys(cnt).sort(function (a, b) {
       var A = DATA.books[a], B = DATA.books[b];
       if (A.core !== B.core) return A.core ? -1 : 1;
@@ -688,9 +723,9 @@
     $('#srcList').innerHTML = codes.map(function (k) {
       var b = DATA.books[k], on = !F.books || F.books.indexOf(k) >= 0;
       var hide = q && norm(b.name).indexOf(q) < 0 && norm(k).indexOf(q) < 0;
-      return '<label class="srcrow" style="--h:' + b.h + '"' + (hide ? ' hidden' : '') + '><input type="checkbox" data-src="' + k + '"' + (on ? ' checked' : '') + '><span class="dot"></span><span>' + esc(b.name) + '</span><span class="n">' + cnt[k] + '</span></label>';
+      return '<label class="srcrow' + (cnt[k] || (F.books && on) ? '' : ' zero') + '" style="--h:' + b.h + '"' + (hide ? ' hidden' : '') + '><input type="checkbox" data-src="' + k + '"' + (on ? ' checked' : '') + '><span class="dot"></span><span>' + esc(b.name) + '</span><span class="n">' + cnt[k] + '</span></label>';
     }).join('');
-    var sel = F.books ? F.books.filter(function (k) { return cnt[k]; }).length : codes.length;
+    var sel = F.books ? F.books.filter(function (k) { return k in cnt; }).length : codes.length;
     $('#srcSum').textContent = sel === codes.length ? 'Sources' : 'Sources (' + sel + '/' + codes.length + ')';
     $('#srcPick').classList.toggle('filtered', sel !== codes.length);
   }
@@ -761,6 +796,7 @@
   }
   function renderList() {
     lastRows = results();
+    renderMenus(); renderSources();
     var list = $('#list');
     list.className = 'list detail-' + F.view;
     list.innerHTML = lastRows.slice(0, shown).map(card).join('');
@@ -1118,16 +1154,7 @@
         if (ta) ta.focus(); else { var nb3 = $('#groups [data-note="' + nid + '"]'); if (nb3) nb3.focus(); }
         return;
       }
-      if ((t = e.target.closest('[data-lv]')) && t.closest('#lvlChips')) {
-        var lv = +t.dataset.lv, i = F.lv.indexOf(lv);
-        if (i >= 0) F.lv.splice(i, 1); else F.lv.push(lv);
-        F.lv.sort(); shown = PAGE; renderFilters(); renderList(); writeUrl(); return;
-      }
-      if ((t = e.target.closest('[data-sch]'))) {
-        var sc = t.dataset.sch, j = F.sch.indexOf(sc);
-        if (j >= 0) F.sch.splice(j, 1); else F.sch.push(sc);
-        shown = PAGE; renderFilters(); $('#schPick').open = true; renderList(); writeUrl(); return;
-      }
+      if ((t = e.target.closest('[data-mclear]'))) { F[t.dataset.mclear] = []; shown = PAGE; renderList(); writeUrl(); return; }
       if ((t = e.target.closest('[data-scope]'))) { F.scope = t.dataset.scope; shown = PAGE; renderFilters(); renderList(); writeUrl(); return; }
       if ((t = e.target.closest('[data-detail]'))) { F.view = t.dataset.detail; store.set('dm.view', F.view); renderFilters(); renderList(); writeUrl(); return; }
     });
@@ -1135,6 +1162,12 @@
       var t = e.target;
       if (t.dataset.tier) { var it = item(t.dataset.tier); if (it) { it.t = t.value; saveLists(); renderMine(); if ($('#detail').open && t.id !== 'dTier') openSpell($('#detail').dataset.id); } return; }
       if (t.dataset.rcls) { var ic = item(t.dataset.rcls); if (ic) { ic.c = t.value; saveLists(); renderMine(); var rc = $('#groups [data-rcls="' + ic.id + '"]'); if (rc) rc.focus(); } return; }
+      if (t.dataset.mk) {
+        var mk = t.dataset.mk, mv = t.dataset.mo;
+        F[mk] = F[mk].filter(function (v) { return v !== mv; });
+        if (t.checked) F[mk].push(mv);
+        shown = PAGE; renderList(); writeUrl(); return;
+      }
       if (t.dataset.prep) { var ip = item(t.dataset.prep); if (ip) { ip.p = t.checked; saveLists(); renderMine(); var c = $('#groups [data-prep="' + ip.id + '"]'); if (c) c.focus(); } return; }
       if (t.dataset.src) {
         var all = Object.keys(DATA.books);
@@ -1175,14 +1208,22 @@
     });
     var qTimer = null;
     $('#search').addEventListener('input', function () { F.q = this.value; clearTimeout(qTimer); qTimer = setTimeout(function () { shown = PAGE; renderList(); writeUrl(); }, 120); });
-    ['time', 'conc', 'rit', 'dmg', 'save', 'sort'].forEach(function (k) {
-      $('#' + k).addEventListener('change', function () { F[k] = this.value; shown = PAGE; renderList(); writeUrl(); });
+    $('#sort').addEventListener('change', function () { F.sort = this.value; shown = PAGE; renderList(); writeUrl(); });
+    // one filter menu open at a time; each opens under its own button, nudged left to stay 16px inside the screen
+    $$('details.srcpick').forEach(function (d) {
+      d.addEventListener('toggle', function () {
+        if (!d.open) return;
+        $$('details.srcpick').forEach(function (o) { if (o !== d) o.open = false; });
+        var pop = d.querySelector('.srcpop');
+        pop.style.left = '0px';
+        var r = pop.getBoundingClientRect(), over = r.right - (document.documentElement.clientWidth - 16);
+        if (over > 0) pop.style.left = -Math.min(over, r.left - 16) + 'px';
+      });
     });
     $('#onlyCls').addEventListener('change', function () { F.only = this.value; shown = PAGE; renderList(); writeUrl(); });
     $('#castable').addEventListener('change', function () { F.castable = this.checked; shown = PAGE; renderList(); writeUrl(); });
     $('#hidePicked').addEventListener('change', function () { F.hidePicked = this.checked; shown = PAGE; renderList(); writeUrl(); });
     $('#optTog').addEventListener('change', function () { F.opt = this.checked; shown = PAGE; prepare(); renderFilters(); renderList(); renderMine(); writeUrl(); });
-    $('#schClear').addEventListener('click', function () { F.sch = []; renderFilters(); renderList(); writeUrl(); });
     $('#srcQ').addEventListener('input', renderSources);
     $('#srcCore').addEventListener('click', function () { F.books = Object.keys(DATA.books).filter(function (k) { return DATA.books[k].core; }); renderSources(); renderList(); writeUrl(); });
     $('#srcAll').addEventListener('click', function () { F.books = null; renderSources(); renderList(); writeUrl(); });
@@ -1235,6 +1276,7 @@
       DC.onChange(onChars);
     }
     $('#generated').textContent = 'Data built ' + d.generated + ': ' + d.spells.length + ' spells, ' + d.spells.filter(function (s) { return s.text; }).length + ' with SRD text.';
+    buildMenus();
     bind();
     renderAll();
     if (spell && SP[spell]) openSpell(spell);

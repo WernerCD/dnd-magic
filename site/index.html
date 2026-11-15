@@ -106,30 +106,7 @@
           <button type="button" role="radio" data-scope="all" title="Every spell for these rules (for feats, Magical Secrets and the like)">All spells</button>
         </div>
         <select id="onlyCls" aria-label="Which class list" hidden></select>
-        <div class="chips" id="lvlChips" role="group" aria-label="Spell level"></div>
-        <details class="srcpick fpick" id="schPick">
-          <summary id="schSum">School</summary>
-          <div class="srcpop"><div class="srcbtns"><button type="button" id="schClear">Clear schools</button></div><div class="chips" id="schChips" role="group" aria-label="School"></div></div>
-        </details>
-        <select id="time" aria-label="Casting time">
-          <option value="">Any casting time</option>
-          <option value="action">Action</option>
-          <option value="bonus">Bonus action</option>
-          <option value="reaction">Reaction</option>
-          <option value="long">1 minute or longer</option>
-        </select>
-        <select id="conc" aria-label="Concentration">
-          <option value="">Concentration or not</option>
-          <option value="yes">Concentration only</option>
-          <option value="no">No concentration</option>
-        </select>
-        <select id="rit" aria-label="Ritual">
-          <option value="">Ritual or not</option>
-          <option value="yes">Rituals only</option>
-          <option value="no">Not rituals</option>
-        </select>
-        <select id="dmg" aria-label="Damage type"><option value="">Any damage type</option></select>
-        <select id="save" aria-label="Saving throw"><option value="">Any save or attack</option></select>
+        <span id="menus" class="menus"></span>
         <details class="srcpick" id="srcPick">
           <summary id="srcSum">Sources</summary>
           <div class="srcpop">
