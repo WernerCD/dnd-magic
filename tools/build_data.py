@@ -121,13 +121,16 @@ def main():
 
     spells, matched, missing = [], 0, []
     by_ref = {}
+    # names that have a 2024-rules version in any book (the 2024 PHB or a later one, e.g. Catnap)
+    new_names = {norm(s["name"]) for s in facts if s["ed"] == "2024"}
     for s in facts:
         rec = dict(s)
         rec.pop("srdName", None)
         rec.pop("reprint", None)
-        # in the 2024 rules, an older spell that the 2024 Player's Handbook did not reprint is still usable
-        rec["legacy"] = s["ed"] == "2014" and "XPHB" not in s["reprint"] and "2024" in s["lists"]
-        if s["ed"] == "2014" and "XPHB" in s["reprint"]:
+        # in the 2024 rules, an older spell that no 2024 book reprinted is still usable ("from older books")
+        reprinted = s["ed"] == "2014" and ("XPHB" in s["reprint"] or norm(s["name"]) in new_names)
+        rec["legacy"] = s["ed"] == "2014" and not reprinted and "2024" in s["lists"]
+        if reprinted:
             rec["lists"].pop("2024", None)
         if s["srd"]:
             doc = "srd-2024" if s["srd"] == "5.2" else "srd-2014"

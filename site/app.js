@@ -35,7 +35,7 @@
   // ------------------------------------------------------------ class model
   // A list holds up to 3 class rows (L.k): {cls, sub, opt, lvl, mod}. cls "_other" is a class without
   // spellcasting: it only adds to the character level.
-  var OTHER = '_other', MAXROWS = 3;
+  var OTHER = '_other', MAXROWS = 4;
   var NONCAST = ['Barbarian', 'Fighter', 'Monk', 'Rogue'];   // classes offered as "no spells" rows
   function classes() { return DATA.classes[L.ed] || []; }
   function casterClasses() {
@@ -193,9 +193,12 @@
     if (cls === OTHER && nm) out.nm = nm;
     return out;
   }
-  function saveLists() { LS.cur = L.id; store.set('dm.lists', LS); }
+  var lastSaved = null;   // the dm.lists text this tab last read or wrote: anything else came from another tab
+  function saveLists() { LS.cur = L.id; store.set('dm.lists', LS); lastSaved = rawLists(); }
+  function rawLists() { try { return localStorage.getItem('dm.lists'); } catch (e) { return null; } }
   function loadLists() {
     var d = store.get('dm.lists', null);
+    lastSaved = rawLists();
     if (d && Array.isArray(d.lists) && d.lists.length) {
       LS = { lists: d.lists.map(clean).filter(Boolean), cur: d.cur };
     }
@@ -257,7 +260,7 @@
   function charOf(x) { return DC && x && x.ch ? DC.get(x.ch) : null; }
   // the character's classes as list rows (at most 3, non-casters folded into one "other" row)
   function charRows(ch) {
-    var keep = L, rows = [], other = 0, names = [];
+    var keep = L, rows = [], other = 0, names = [], fold = [];
     L = { ed: ch.ed, k: [] };
     ch.classes.forEach(function (x) {
       var c = casterClasses().find(function (c) { return c.id === x.cls; });
@@ -271,14 +274,15 @@
         var src = row.sub && subRec(row) && subRec(row).caster ? subRec(row) : c;
         row.mod = Math.max(-5, Math.min(10, DC.mod(ch, src.ability || c.ability)));
       }
-      if (row && rows.length < MAXROWS - (other ? 1 : 0)) rows.push(row);
-      else { other += x.lvl; if (names.indexOf(capName(x.cls)) < 0) names.push(capName(x.cls)); }
+      if (row) rows.push(row); else fold.push(x);
     });
     L = keep;
-    if (rows.length && other) {
-      if (rows.length === MAXROWS) rows.pop();
-      rows.push({ cls: OTHER, nm: names.join(' / '), sub: null, opt: null, lvl: Math.min(other, 20), mod: 0 });
-    }
+    if (!rows.length) return rows;
+    // more classes than rows: the last casters join the "other" row (their levels still count, spells not)
+    var room = MAXROWS - (fold.length ? 1 : 0);
+    if (rows.length > room) { room = MAXROWS - 1; fold = rows.splice(room).map(function (r) { return { cls: r.cls, lvl: r.lvl }; }).concat(fold); }
+    fold.forEach(function (x) { other += x.lvl; if (names.indexOf(capName(x.cls)) < 0) names.push(capName(x.cls)); });
+    if (other) rows.push({ cls: OTHER, nm: names.join(' / '), sub: null, opt: null, lvl: Math.min(other, 20), mod: 0 });
     return rows;
   }
   // bring one list in line with its character; returns true if anything changed
@@ -324,9 +328,32 @@
   }
   // characters changed (here, in another tab, or on another site): resync linked lists, follow the active one
   var lastActive = null, quietChars = false;
+  // another tab may have written the lists: take its copy before changing anything here
+  function reloadLists() {
+    var raw = rawLists();
+    if (raw === lastSaved) return false;
+    lastSaved = raw;
+    var d = store.get('dm.lists', null);
+    if (!d || !Array.isArray(d.lists) || !d.lists.length) return false;
+    var cur = L.id;
+    LS = { lists: d.lists.map(clean).filter(Boolean), cur: cur };
+    L = LS.lists.find(function (x) { return x.id === cur; }) || LS.lists[0];
+    return true;
+  }
+  // re-render without losing the place in a note being typed or a control in use
+  function keepFocus(fn) {
+    var a = document.activeElement, sel = null, pos = null;
+    if (a && a.dataset) {
+      if (a.dataset.noteedit) { sel = '#groups [data-noteedit="' + a.dataset.noteedit + '"]'; pos = a.selectionStart; }
+      else if (a.id) sel = '#' + a.id;
+    }
+    fn();
+    var b = sel && $(sel);
+    if (b && b !== document.activeElement) { b.focus(); if (pos != null && b.setSelectionRange) b.setSelectionRange(pos, pos); }
+  }
   function onChars(active) {
     if (quietChars) return;
-    var changed = false;
+    var changed = reloadLists();
     LS.lists.forEach(function (x) {
       var ch = charOf(x);
       if (unlinkGone(x)) changed = true;
@@ -339,9 +366,8 @@
       if (active && L.ch !== aid && useChar(active)) changed = true;
     }
     if (!changed) return;   // another site re-saved the character or its own link: nothing this site uses changed
-    editing = {}; shown = PAGE;
     saveLists();
-    renderAll();
+    keepFocus(renderAll);
   }
   // "Save as character": a new shared character from this list's classes (only when the list has none)
   function saveAsChar() {
@@ -392,6 +418,7 @@
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return new TextDecoder().decode(bytes);
   }
+  var SHARE_MAX = 8000;   // longer links break in some chat apps and browsers
   function shareUrl() {
     var c = { v: 2, n: L.name, e: L.ed, k: L.k.map(function (r) { return [r.cls === OTHER && r.nm ? OTHER + ':' + r.nm : r.cls, r.sub, r.opt, r.lvl, r.mod]; }),
       i: L.items.map(function (it) {
@@ -418,7 +445,7 @@
       else {
         x.name = x.name + ' (shared)';
         // a brand-new visitor only has the empty starter list: replace it rather than keep it beside the shared one
-        if (LS.lists.length === 1 && !LS.lists[0].items.length) LS.lists = [];
+        if (LS.lists.length === 1 && !LS.lists[0].items.length && !LS.lists[0].ch) LS.lists = [];
         LS.lists.push(x); L = x; notice('Added the shared list "' + x.name + '" to your lists.'); }
       saveLists();
     } catch (e) { notice('That share link could not be read.'); }
@@ -456,11 +483,29 @@
   function readUrl() {
     var p = new URLSearchParams(location.search);
     if (p.get('q')) F.q = p.get('q');
-    MENUS.forEach(function (M) { if (p.get(M.p)) F[M.k] = p.get(M.p).split(',').filter(Boolean).slice(0, 20); });
-    if (p.get('conc') === 'yes' || p.get('conc') === 'no') F.props.push(p.get('conc') === 'yes' ? 'conc' : 'noconc');
-    if (p.get('rit') === 'yes' || p.get('rit') === 'no') F.props.push(p.get('rit') === 'yes' ? 'rit' : 'norit');
-    if (p.get('sort')) F.sort = p.get('sort');
-    if (p.get('books')) F.books = p.get('books') === 'all' ? null : p.get('books').split(',');
+    var bad = [], allDmg = {};
+    DATA.spells.forEach(function (s) { (s.dmg || []).forEach(function (d) { allDmg[d] = 1; }); });
+    MENUS.forEach(function (M) {
+      if (!p.get(M.p)) return;
+      var ok = M.k === 'dmg' ? Object.keys(allDmg) : M.opts().map(function (o) { return o[0]; });
+      p.get(M.p).split(',').filter(Boolean).slice(0, 20).forEach(function (v) {
+        if (ok.indexOf(v) >= 0) { if (F[M.k].indexOf(v) < 0) F[M.k].push(v); } else bad.push(M.p + '=' + v);
+      });
+    });
+    ['conc', 'rit'].forEach(function (k) {
+      var v = p.get(k);
+      if (v === 'yes' || v === 'no') F.props.push(k === 'conc' ? (v === 'yes' ? 'conc' : 'noconc') : (v === 'yes' ? 'rit' : 'norit'));
+      else if (v) bad.push(k + '=' + v);
+    });
+    if (p.get('sort')) { if (['level', 'name', 'school', 'src'].indexOf(p.get('sort')) >= 0) F.sort = p.get('sort'); else bad.push('sort=' + p.get('sort')); }
+    if (p.get('books') && p.get('books') !== 'all') {
+      var bk = p.get('books').split(',');
+      F.books = bk.filter(function (k) { return DATA.books[k]; });
+      bk.forEach(function (k) { if (!DATA.books[k]) bad.push('books=' + k); });
+    }
+    if (p.get('view') && ['basic', 'stats', 'full'].indexOf(p.get('view')) < 0) bad.push('view=' + p.get('view'));
+    if (p.get('spell') && !SP[p.get('spell')]) bad.push('spell=' + p.get('spell'));
+    if (bad.length) notice('Ignored ' + (bad.length === 1 ? 'a filter' : bad.length + ' filters') + ' from the link that this page does not know: ' + bad.slice(0, 4).join(', ') + (bad.length > 4 ? ' and ' + (bad.length - 4) + ' more.' : '.'));
     if (p.get('scope') === 'all') F.scope = 'all';
     if (p.get('only')) F.only = p.get('only');
     if (p.get('view')) F.view = ['basic', 'stats', 'full'].indexOf(p.get('view')) >= 0 ? p.get('view') : F.view;
@@ -533,7 +578,7 @@
     var free = 20 - charLevel();
     if (L.k.length < MAXROWS) h += '<div class="crow crow-add"><button type="button" class="btn" id="addCls"' + (free < 1 ? ' disabled title="Your character is already level 20"' : '') + '>+ Add a class (multiclass)</button>' +
       (L.k.length > 1 ? '<span class="small muted">Character level ' + charLevel() + '</span>' : '') + '</div>';
-    else h += '<div class="crow crow-add"><span class="small muted">Character level ' + charLevel() + ' (3 classes at most here)</span></div>';
+    else h += '<div class="crow crow-add"><span class="small muted">Character level ' + charLevel() + ' (' + MAXROWS + ' classes at most here)</span></div>';
     $('#classRows').innerHTML = h + charNote();
     var sc = $('[data-act="savechar"]');
     if (sc) sc.hidden = !DC || !!charOf(L);
@@ -821,13 +866,32 @@
   }
 
   // ------------------------------------------------------------ my list
+  // spells the subclass grants at this level: id -> {sp, x, X}
+  function fixedMap() {
+    var m = {};
+    CTX.forEach(function (X) {
+      Object.keys(X.SS).forEach(function (id) {
+        var x = X.SS[id], sp = SP[id];
+        if (sp && x.kind !== 'expanded' && unlocked(x, sp, X) && !m[id]) m[id] = { sp: sp, x: x, X: X };
+      });
+    });
+    return m;
+  }
+  // why a spell on the list does not count against a limit (null = it counts)
+  function freeWhy(sp, X, FX) {
+    if (FX[sp.id]) return KIND[FX[sp.id].x.kind] + (CTX.length > 1 ? ' (' + FX[sp.id].X.label + ')' : '');
+    if (X && X.P.pact && sp.lvl >= 6) return 'Mystic Arcanum';
+    return null;
+  }
   function classCounts() {
+    var FX = fixedMap();
     var out = { _: { cantrips: 0, spells: 0, prepared: 0 } };
     CTX.forEach(function (x) { out[x.key] = { cantrips: 0, spells: 0, prepared: 0 }; });
     L.items.forEach(function (it) {
       var sp = SP[it.id];
       if (!sp) return;
       var x = assigned(it, sp), c = x ? out[x.key] : out._;
+      if (freeWhy(sp, x, FX)) return;
       if (sp.lvl === 0) c.cantrips++; else { c.spells++; if (it.p) c.prepared++; }
     });
     return out;
@@ -868,14 +932,10 @@
     $('#tabCount').textContent = '(' + L.items.length + ')';
     $('#tabCount').setAttribute('aria-label', L.items.length + ' spells');
 
-    var byLv = {}, seenFixed = {};
+    var byLv = {}, FX = fixedMap(), inList = {};
     for (var i = 0; i <= 9; i++) byLv[i] = { fixed: [], items: [] };
-    CTX.forEach(function (X) {
-      Object.keys(X.SS).forEach(function (id) {
-        var x = X.SS[id], sp = SP[id];
-        if (sp && x.kind !== 'expanded' && unlocked(x, sp, X) && !seenFixed[id]) { seenFixed[id] = 1; byLv[sp.lvl].fixed.push({ sp: sp, x: x, X: X }); }
-      });
-    });
+    L.items.forEach(function (it) { inList[it.id] = 1; });
+    Object.keys(FX).forEach(function (id) { if (!inList[id]) byLv[FX[id].sp.lvl].fixed.push(FX[id]); });
     var unknown = [];
     L.items.forEach(function (it) { var sp = SP[it.id]; if (sp) byLv[sp.lvl].items.push(it); else unknown.push(it); });
     html = '';
@@ -887,7 +947,7 @@
       g.fixed.forEach(function (f) {
         html += '<li class="row fixed"><span class="fixmark" aria-hidden="true">\u2605</span><button type="button" class="linkish nm" data-open="' + f.sp.id + '">' + esc(f.sp.name) + '</button><span class="tag t-sub">' + KIND[f.x.kind] + (multi ? ' (' + esc(f.X.label) + ')' : '') + '</span>' + pfacts(f.sp) + '</li>';
       });
-      g.items.forEach(function (it, k) { html += rowHtml(it, SP[it.id], k, g.items.length); });
+      g.items.forEach(function (it, k) { html += rowHtml(it, SP[it.id], k, g.items.length, FX); });
       html += '</ul></section>';
     }
     if (unknown.length) {
@@ -898,8 +958,8 @@
     if (!html) html = '<p class="empty">No spells yet. Use <b>+</b> on a spell card to add it here.</p>';
     $('#groups').innerHTML = html;
   }
-  function rowHtml(it, sp, k, n) {
-    var nm = esc(sp.name), X = assigned(it, sp), m = membership(sp), multi = CTX.length > 1;
+  function rowHtml(it, sp, k, n, FX) {
+    var nm = esc(sp.name), X = assigned(it, sp), m = membership(sp), multi = CTX.length > 1, why = freeWhy(sp, X, FX || {});
     var tooHigh = sp.lvl > 0 && sp.lvl > (X ? X.P.maxAny : COMBO.maxAny);
     var h = '<li class="row' + (tooHigh ? ' locked' : '') + '" data-id="' + sp.id + '">';
     h += '<button type="button" class="handle" data-drag aria-label="Move ' + nm + ': drag, or use the up and down arrow keys" title="Drag to reorder (or focus and use arrow keys)"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></button>';
@@ -907,7 +967,8 @@
     h += '<select class="tier" data-tier="' + sp.id + '" aria-label="Tier for ' + nm + '"' + (it.t ? ' data-t="' + it.t + '"' : '') + '><option value="">\u2013</option>' + TIERS.map(function (t) { return '<option value="' + t + '"' + (it.t === t ? ' selected' : '') + ' title="' + TIER_NAME[t] + '">' + t + '</option>'; }).join('') + '</select>';
     h += '<span class="row-main"><button type="button" class="linkish nm" data-open="' + sp.id + '">' + nm + '</button>' + (sp.conc ? '<span class="tag t-conc" title="Concentration">C</span>' : '') + (sp.ritual ? '<span class="tag t-rit" title="Ritual">R</span>' : '') +
       (tooHigh ? '<span class="small muted"> (later)</span>' : '') + (it.t ? '<span class="ptier">' + it.t + '</span>' : '') + (it.p ? '<span class="ptier">Prepared</span>' : '') +
-      (multi || !X ? '<span class="ptier">' + (X ? esc(X.label) : 'Other') + '</span>' : '') + '</span>' + pfacts(sp);
+      (multi || !X ? '<span class="ptier">' + (X ? esc(X.label) : 'Other') + '</span>' : '') +
+      (why ? '<span class="tag t-sub" title="Does not count against your known or prepared spells">' + esc(why) + '</span>' : '') + '</span>' + pfacts(sp);
     if (X && X.P.book != null && sp.lvl > 0) h += '<label class="prep" title="Prepared today"><input type="checkbox" data-prep="' + sp.id + '"' + (it.p ? ' checked' : '') + '> P</label>';
     if (multi || !m.on || it.c) {
       h += '<select class="rcls" data-rcls="' + sp.id + '" aria-label="Class ' + nm + ' counts for" title="Which class this spell counts for">' +
@@ -1122,6 +1183,7 @@
       }
       else if (act === 'share') {
         var url = shareUrl();
+        if (url.length > SHARE_MAX) { notice('"' + L.name + '" is too long for a share link (' + L.items.length + ' spells). Use "Export all lists (JSON)" to pass it on instead.'); return; }
         var done = function () { notice('Share link copied. Anyone who opens it gets a copy of "' + L.name + '".'); };
         if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () { prompt('Copy this link:', url); });
         else prompt('Copy this link:', url);
@@ -1223,12 +1285,7 @@
     });
     window.addEventListener('storage', function (e) {
       if (e.key !== 'dm.lists' || !e.newValue) return;
-      var d = store.get('dm.lists', null);
-      if (!d || !Array.isArray(d.lists) || !d.lists.length) return;
-      var cur = L.id;
-      LS = { lists: d.lists.map(clean).filter(Boolean), cur: cur };
-      L = LS.lists.find(function (x) { return x.id === cur; }) || LS.lists[0];
-      editing = {}; prepare(); renderAll();
+      if (reloadLists()) { keepFocus(renderAll); }
     });
     // Escape closes an open menu and returns focus to its button
     document.addEventListener('keydown', function (e) {
