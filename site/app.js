@@ -1042,6 +1042,47 @@
     if (!html) html = '<p class="empty">No spells yet. Use <b>+</b> on a spell card to add it here.</p>';
     $('#groups').innerHTML = html;
     renderCharts();
+    publishSheet();
+  }
+  // the character sheet / party pages read a small summary of this list (STYLE 6e, DndChar.setSheet)
+  var SHEET_MAX = 6000;
+  function shortTime(t) {
+    var m = /^(\d+)\s+(bonus action|reaction|action|minutes?|hours?)/.exec(t || '');
+    if (!m) return String(t || '').slice(0, 12);
+    return m[1] + ({ 'bonus action': 'BA', reaction: 'R', action: 'A' }[m[2]] || (m[2].charAt(0) === 'm' ? 'm' : 'h'));
+  }
+  function sheetFor(x, ch) {
+    var FX = fixedMap(), seen = {}, out = [];
+    var add = function (sp, extra) {
+      if (!sp || seen[sp.id]) return; seen[sp.id] = 1;
+      var o = { n: sp.name, lvl: sp.lvl, t: shortTime(sp.time), r: sp.range };
+      if (sp.conc) o.conc = 1;
+      if (sp.ritual) o.rit = 1;
+      for (var k in extra) if (extra[k]) o[k] = extra[k];
+      if (x.rt && x.rt[sp.id]) o.rt = x.rt[sp.id];
+      out.push(o);
+    };
+    x.items.forEach(function (it) {
+      var sp = SP[it.id]; if (!sp) return;
+      var X = assigned(it, sp), why = freeWhy(sp, X, FX);
+      // prepared: the P box for spellbook casters; every other caster's chosen spells are known or prepared already
+      add(sp, { cls: CTX.length > 1 && X ? X.label : null, p: sp.lvl > 0 && X && X.P.book != null ? (it.p ? 1 : 0) : null, always: why ? 1 : null, other: !X ? 1 : null });
+    });
+    Object.keys(FX).forEach(function (id) { add(FX[id].sp, { always: 1, cls: CTX.length > 1 ? FX[id].X.label : null }); });
+    out.sort(function (a, b) { return a.lvl - b.lvl; });
+    var sum = { v: 1, ed: x.ed, list: x.name, spells: out };
+    if (JSON.stringify(sum).length > SHEET_MAX) out.forEach(function (o) { delete o.r; });
+    while (JSON.stringify(sum).length > SHEET_MAX && out.length) out.pop();
+    return sum;
+  }
+  function publishSheet() {
+    if (!DC || !L.ch || !CTX.length) return;
+    var ch = charOf(L); if (!ch) return;
+    var link = ch.links[REPO] || {}, mine = charLists(ch);
+    var pref = mine.find(function (y) { return y.id === link.list; }) || mine[0];
+    if (pref !== L) return;   // the character's main list speaks for it
+    var q = quietChars; quietChars = true;
+    try { DC.setSheet(ch.id, REPO, sheetFor(L, ch)); } finally { quietChars = q; }
   }
   // bar charts of the current list: spells per level, and the reader's own ratings (shared chart.js, bklit look)
   var chLv = null, chRt = null;
