@@ -124,7 +124,11 @@ def write_search(spells):
             line += ", " + "/".join(cls)
         eds = sorted({x["ed"] for x in group})
         line += " (" + " and ".join(eds) + ")"
-        items.append({"n": s["name"], "t": line, "k": "Spell", "u": "?spell=" + s["id"]})
+        it = {"n": s["name"], "t": line, "k": "Spell", "u": "?spell=" + s["id"]}
+        old14 = [x for x in group if x["ed"] == "2014"]
+        if s["ed"] == "2024" and old14:
+            it["u14"] = "?spell=" + old14[0]["id"]   # STYLE 6j: 2014 text elsewhere links to the 2014 version
+        items.append(it)
     items.sort(key=lambda x: x["n"].lower())
     p = ROOT / "site" / "search.json"
     p.write_text(json.dumps({"v": 1, "items": items}, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

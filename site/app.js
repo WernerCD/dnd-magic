@@ -1002,7 +1002,7 @@
       h += '<dl class="facts cfacts">' + factsHtml(s).map(function (x) { return '<dt>' + x[0] + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl>';
     }
     if (F.view === 'full') {
-      h += s.text ? '<div class="itext mini" data-dice data-links data-roll-ctx="' + esc(s.name) + '">' + blocksHtml(s.text) + (s.higher ? '<p><b><i>' + (s.lvl ? 'At Higher Levels.' : 'Cantrip Upgrade.') + '</i></b> ' + blocksHtml(s.higher).replace(/^<p>|<\/p>$/g, '') + '</p>' : '') + '</div>'
+      h += s.text ? '<div class="itext mini" data-dice data-links data-ed="' + s.ed + '" data-roll-ctx="' + esc(s.name) + '">' + blocksHtml(s.text) + (s.higher ? '<p><b><i>' + (s.lvl ? 'At Higher Levels.' : 'Cantrip Upgrade.') + '</i></b> ' + blocksHtml(s.higher).replace(/^<p>|<\/p>$/g, '') + '</p>' : '') + '</div>'
         : '<p class="small muted factsonly">Rules text: ' + esc(DATA.books[s.src].name) + (s.page ? ' p.' + s.page : '') + '.</p>';
     }
     if (tooHigh) h += '<div class="why">' + whenText(s, m) + '</div>';
@@ -1278,7 +1278,7 @@
     rows.push(['Source', DATA.books[s.src].name + (s.page ? ', p.' + s.page : '') + (s.srdName ? ' (in the SRD as ' + s.srdName + ')' : '')]);
     h += '<dl class="facts-dl">' + rows.map(function (x) { return '<dt>' + x[0] + '</dt><dd>' + esc(x[1]) + '</dd>'; }).join('') + '</dl>';
     if (s.text) {
-      h += '<div class="itext" data-dice data-links data-roll-ctx="' + esc(s.name) + '">' + blocksHtml(s.text);
+      h += '<div class="itext" data-dice data-links data-ed="' + s.ed + '" data-roll-ctx="' + esc(s.name) + '">' + blocksHtml(s.text);
       if (s.higher) h += '<p><b><i>' + (s.lvl ? (s.ed === '2024' ? 'Using a Higher-Level Spell Slot.' : 'At Higher Levels.') : 'Cantrip Upgrade.') + '</i></b> ' + blocksHtml(s.higher).replace(/^<p>|<\/p>$/g, '') + '</p>';
       if (s.mat) h += '<p class="small">Material component: ' + s.mat + '</p>';
       h += '</div><p class="small muted">Text from the System Reference Document ' + s.srd + ' by Wizards of the Coast LLC, licensed under CC BY 4.0.</p>';
