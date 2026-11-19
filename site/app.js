@@ -482,7 +482,7 @@
       ' <button type="button" class="linkish" id="unlinkChar">Unlink</button></span>';
   }
 
-  var IMP_SRC = { ddb: 'D&D Beyond', foundry: 'Foundry VTT', fc5: 'Fight Club 5' };
+  var IMP_SRC = { ddb: 'D&D Beyond', foundry: 'Foundry VTT', fc5: 'Fight Club 5', dicecloud: 'DiceCloud' };
   // a newer import than this site last looked at: show the offer (once per import)
   function checkImport(ch) {
     var box = $('#impOffer');
@@ -501,15 +501,21 @@
     var ed = ch.imp.ed === '2014' || ch.imp.ed === '2024' ? ch.imp.ed : ch.ed, src = IMP_SRC[ch.imp.src] || 'import';
     var x = { id: uid(), name: (ch.name + "'s spells (" + src + ')').slice(0, 60), ed: ed, k: [], items: [], rt: {}, ch: ch.id };
     if (charRows(ch).length) syncList(x, ch); else x.k = [cleanRow({})];
-    var missed = [], seen = {};
+    var missed = [], unprep = [], seen = {};
+    var book = function (cls) { var c = classes().find(function (k) { return k.id === cls; }); return !!(c && c.spellbook); };
     ch.imp.spells.forEach(function (sp) {
       var n = String(sp && sp.n || '').trim(); if (!n) return;
+      var cls0 = sp.cls ? String(sp.cls).toLowerCase() : null;
+      // p:0 = known but not prepared. A spellbook caster keeps it (unticked P); for everyone else the list is the
+      // prepared or known selection, so it is left out and named in the notice
+      if (sp.p === 0 && !(cls0 && book(cls0))) { if (unprep.indexOf(n) < 0) unprep.push(n); return; }
       var c = (BYNAME[norm(n)] || []).filter(function (s) { return ed === '2014' ? s.ed === '2014' : (s.ed === '2024' || s.legacy); });
       c.sort(function (a, b) { return (a.ed === ed ? 0 : 1) - (b.ed === ed ? 0 : 1); });
       if (!c[0]) { if (missed.indexOf(n) < 0) missed.push(n); return; }
       if (seen[c[0].id]) return; seen[c[0].id] = 1;
-      var it = { id: c[0].id, t: '', n: '', p: !!sp.p }, cls = String(sp.cls || '').toLowerCase();
-      if (x.k.some(function (r) { return r.cls === cls; })) it.c = cls;
+      var it = { id: c[0].id, t: '', n: '', p: !!sp.p }, cls = cls0;
+      if (!cls) it.c = '-';   // from a species, feat or item: listed, but not counted against a class
+      else if (x.k.some(function (r) { return r.cls === cls; })) it.c = cls;
       x.items.push(it);
     });
     if (LS.lists.length === 1 && !LS.lists[0].items.length && !LS.lists[0].ch) LS.lists = [];
@@ -523,6 +529,7 @@
     setMyLink(ch, first ? { list: x.id, impAt: ch.imp.at } : { impAt: ch.imp.at });
     saveLists(); renderAll();
     notice('Made "' + x.name + '" with ' + x.items.length + ' spell' + (x.items.length === 1 ? '' : 's') + '.' +
+      (unprep.length ? ' Left out as not prepared: ' + unprep.slice(0, 12).join(', ') + (unprep.length > 12 ? ' and ' + (unprep.length - 12) + ' more' : '') + '.' : '') +
       (missed.length ? ' Not found in the ' + ed + ' spell data, so left out: ' + missed.slice(0, 12).join(', ') + (missed.length > 12 ? ' and ' + (missed.length - 12) + ' more' : '') + '.' : ''));
   }
 
