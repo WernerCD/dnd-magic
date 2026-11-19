@@ -140,7 +140,7 @@
           </select>
         </div>
       </div>
-      <div id="list" class="list"></div>
+      <div id="list" class="list" data-reveal></div>
       <p id="empty" class="empty" hidden>No spells match. Try clearing a filter, switching to <b>All spells</b>, or another rules edition.</p>
       <p class="more-row"><button type="button" class="btn" id="moreBtn" hidden>Show more</button></p>
     </section>
@@ -153,6 +153,12 @@
           <div class="counts" id="counts"></div>
         </div>
         <div id="groups"></div>
+        <section class="mine-charts" id="mineCharts" aria-labelledby="chLvH" hidden>
+          <h3 id="chLvH">Spells by level</h3>
+          <div id="chLevels"></div>
+          <h3 id="chRtH" hidden>My ratings</h3>
+          <div id="chRates" hidden></div>
+        </section>
         <p class="small muted mine-help">Add spells with <b>+</b> on a card. Drag the handle, or use the arrow buttons, to rank spells within a level. Pick a tier and add a note to remember why. Your lists are saved in this browser; use <b>Copy share link</b> or <b>Export</b> in the &hellip; menu to keep a copy elsewhere.</p>
       </div>
     </aside>
@@ -194,8 +200,10 @@
 
 <script>try{window.DM_CHAR_Q=new URLSearchParams(location.search).get('char');}catch(e){}</script>
 <script src="character.js?v=dev"></script>
+<script src="chart.js?v=dev"></script>
 <script src="app.js?v=dev"></script>
 <script src="theme.js?v=dev"></script>
 <script src="version.js?v=dev"></script>
+<script src="motion.js?v=dev" defer></script><script src="ui.js?v=dev" defer></script>
 </body>
 </html>

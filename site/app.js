@@ -551,7 +551,9 @@
   var noticeTimer = null;
   function notice(msg) {
     var n = $('#notice');
+    var was = n.hidden;
     n.textContent = msg; n.hidden = false;
+    if (was && window.DndUI) DndUI.enter(n);
     clearTimeout(noticeTimer);
     noticeTimer = setTimeout(function () { n.hidden = true; }, 6000);
   }
@@ -920,7 +922,7 @@
   function card(r) {
     var s = r.s, m = r.m, on = has(s.id);
     var tooHigh = s.lvl > learnMax(m) && s.lvl > 0;
-    var h = '<article class="card' + (tooHigh ? ' locked' : '') + (m.on ? '' : ' off-list') + '" data-id="' + s.id + '" style="--h:' + SCH_HUE[s.school] + '">';
+    var h = '<article class="card' + (tooHigh ? ' locked' : '') + (m.on ? '' : ' off-list') + '" data-spot data-id="' + s.id + '" style="--h:' + SCH_HUE[s.school] + '">';
     h += '<div class="card-top"><h3><button type="button" class="linkish nm" data-open="' + s.id + '">' + esc(s.name) + '</button></h3><span class="cr" title="' + lvName(s.lvl) + '">' + lvShort(s.lvl) + '</span></div>';
     h += '<div class="meta">' + esc(lineFor(s)) + (F.view === 'basic' ? ' &middot; ' + esc(s.time) : '') + '</div>';
     h += '<div class="pills">' + (rating(s.id) ? '<span class="tag t-rate" title="My rating: ' + rating(s.id) + ' of 5">' + rating(s.id) + ' \u2605</span>' : '') + tagsFor(s, m) + srcTag(s) + (m.on || F.scope !== 'all' ? '' : '<span class="tag t-off" title="Not on your class list">Not on your list</span>') + '</div>';
@@ -1039,6 +1041,29 @@
     }
     if (!html) html = '<p class="empty">No spells yet. Use <b>+</b> on a spell card to add it here.</p>';
     $('#groups').innerHTML = html;
+    renderCharts();
+  }
+  // bar charts of the current list: spells per level, and the reader's own ratings (shared chart.js, bklit look)
+  var chLv = null, chRt = null;
+  function renderCharts() {
+    if (!window.DndPlot) return;
+    var per = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    L.items.forEach(function (it) { var sp = SP[it.id]; if (sp) per[sp.lvl]++; });
+    var top = 9; while (top > 1 && !per[top]) top--;   // levels up to the highest one on the list (at least 1)
+    var any = L.items.length > 0;
+    $('#mineCharts').hidden = !any;
+    if (!any) return;
+    var lv = { labels: ['C'].concat([1, 2, 3, 4, 5, 6, 7, 8, 9].slice(0, top)), values: per.slice(0, top + 1), name: 'Spells',
+      title: 'Spells on "' + L.name + '" by spell level', xLabel: 'Spell level (C = cantrip)', yLabel: 'Spells' };
+    if (chLv) chLv.update(lv); else chLv = DndPlot.bars($('#chLevels'), lv);
+    var st = [0, 0, 0, 0, 0];
+    Object.keys(L.rt || {}).forEach(function (id) { var v = L.rt[id]; if (v >= 1 && v <= 5) st[v - 1]++; });
+    var rated = st.some(function (n) { return n; });
+    $('#chRtH').hidden = $('#chRates').hidden = !rated;
+    if (!rated) return;
+    var rt = { labels: ['1\u2605', '2\u2605', '3\u2605', '4\u2605', '5\u2605'], values: st, name: 'Spells rated',
+      title: 'My ratings in "' + L.name + '"', xLabel: 'Stars', yLabel: 'Spells' };
+    if (chRt) chRt.update(rt); else chRt = DndPlot.bars($('#chRates'), rt);
   }
   function rowHtml(it, sp, k, n, FX) {
     var nm = esc(sp.name), X = assigned(it, sp), m = membership(sp), multi = CTX.length > 1, why = freeWhy(sp, X, FX || {});
@@ -1155,7 +1180,7 @@
     }
     h += '<div class="mn-actions"><button type="button" class="btn" data-add="' + id + '" aria-pressed="' + on + '">' + (on ? 'Remove from ' : 'Add to ') + esc(L.name) + '</button></div></div>';
     $('#dBody').innerHTML = h;
-    if (!dlg.open) dlg.showModal();
+    if (!dlg.open) { dlg.showModal(); if (window.DndUI) DndUI.enter(dlg); }
     writeUrl();
   }
 
