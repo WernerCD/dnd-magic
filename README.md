@@ -16,6 +16,7 @@ Plan spell lists for 2014 and 2024 D&D 5e rules: class and subclass spell lists,
 - **Print my spell sheet** (in the list menu) prints the spellcasting stats and your ranked list, with each spell's casting time, range, components, duration, save, book and page, plus your tiers and notes.
 - Keep as many lists as you like (saved in this browser's localStorage), copy a **share link** that carries the whole list in the URL (`#list=...`), and **export/import** every list as a JSON backup.
 - Filters live in the URL (`?lv=1,2&school=Evocation,Abjuration&props=conc&comp=nov&view=full`; the old `conc=yes` / `rit=no` still work), and `?spell=xphb.fireball` opens one spell.
+- Works offline after one visit (`sw.js`, `offline.js`, `offline.json`), installs as an app (`manifest.webmanifest`, `icons/`) and shows a preview card (`og.png`), STYLE 6h. `site/search.json` lists every spell for the hub's search box (STYLE 6j).
 - **Shared characters** (toolbox `dnd.characters`, `site/character.js`): the active character gets its own list (`links['dnd-magic'] = {list}`), filled from its classes, levels, subclasses (matched with `DndChar.sameSub`) and ability scores, its list goes into the character's share link (`DndChar.setShare`, notes dropped if over 6000 characters) and is taken from the inbox when a shared character is accepted (`takeInbox`; a different existing list is kept and the shared one added as "(shared)"), and the list is kept in step when those fields change on another site (STYLE 6c v1.6.1: if the list's classes were changed here, the user chooses "Use the character's classes" or "Keep mine"). Spells and ranks are never touched. "Save as a shared character" and "Unlink" are in the list menu and build bar; `?char=<id>` opens a character.
 - Motion and charts (toolbox v1.8): `motion.js` (Motion, MIT, vendored), `ui.js` and `chart.js` copied unchanged from the hub. The spell card grid uses `data-reveal` and `data-spot`; notices and the detail dialog use `DndUI.enter`; the list panel draws "Spells by level" and "My ratings" with `DndPlot.bars`.
 - Sheet summary (toolbox v1.9, STYLE 6e): for the character's main linked list, `DndChar.setSheet(id, 'dnd-magic', {v, ed, list, spells: [{n, lvl, t, r, conc, rit, p, always, cls, other, rt}]})` after every list render (`r` dropped, then the highest spells, past 6000 characters).
@@ -40,7 +41,7 @@ Nothing is taken from D&D Beyond. Partnered ("-alt") products and books not yet 
 |---|---|
 | `site/` | The static site (HTML/CSS/JS, no build step for the page itself), including `404.html` |
 | `site/data/spells.json` | Generated data, rebuilt by CI on every push |
-| `tools/build_data.py` | Builds the data from `source/` and `data-src/` (offline) |
+| `tools/build_data.py` | Builds the data from `source/` and `data-src/` (offline), and `site/search.json` for the hub search |
 | `tools/fetch_sources.py` | Refreshes `source/` from Open5e and `data-src/` from 5etools (run by hand) |
 | `tools/check_site.py` | Shared toolbox smoke check, run by CI before every deploy |
 | `source/open5e-spells.json` | SRD 5.1 and 5.2 spells (CC-BY-4.0) |

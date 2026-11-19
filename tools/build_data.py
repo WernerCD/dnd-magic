@@ -108,6 +108,29 @@ def blocks(text):
     return fixed
 
 
+def write_search(spells):
+    """site/search.json for the hub's "Search every tool" box (STYLE 6j): names and short facts only.
+    One entry per spell name; the link opens the 2024 version when there is one."""
+    by = {}
+    for s in spells:
+        by.setdefault(s["name"].lower(), []).append(s)
+    items = []
+    for group in by.values():
+        group.sort(key=lambda s: (s["ed"] != "2024", s.get("legacy", False)))
+        s = group[0]
+        line = f"{s['school']} cantrip" if s["lvl"] == 0 else f"Level {s['lvl']} {s['school'].lower()}"
+        cls = sorted({c.lower() for x in group for ed in x["lists"].values() for c in ed})
+        if cls:
+            line += ", " + "/".join(cls)
+        eds = sorted({x["ed"] for x in group})
+        line += " (" + " and ".join(eds) + ")"
+        items.append({"n": s["name"], "t": line, "k": "Spell", "u": "?spell=" + s["id"]})
+    items.sort(key=lambda x: x["n"].lower())
+    p = ROOT / "site" / "search.json"
+    p.write_text(json.dumps({"v": 1, "items": items}, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    print(f"{len(items)} search entries -> {p} ({p.stat().st_size // 1024} KB)")
+
+
 def main():
     facts = json.loads((ROOT / "data-src" / "spell-facts.json").read_text(encoding="utf-8"))["spells"]
     classes = json.loads((ROOT / "data-src" / "classes.json").read_text(encoding="utf-8"))
@@ -194,6 +217,7 @@ def main():
     p = ROOT / "site" / "data" / "spells.json"
     p.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"{len(spells)} spells ({matched} with SRD text) -> {p} ({p.stat().st_size // 1024} KB)")
+    write_search(spells)
     if missing:
         print("  SRD spells without an Open5e match:", ", ".join(missing))
     if unresolved:
