@@ -53,7 +53,7 @@ python tools/fetch_sources.py   # only to refresh the inputs
 python tools/build_data.py
 python -m http.server 8773 --directory site
 ```
-Checks (CI runs the same before every deploy): `python tools/check_site.py`. Every push to `main` deploys to GitHub Pages via `.github/workflows/pages.yml`, which stamps the commit id over `?v=dev` on the asset links.
+Checks (CI runs the same before every deploy): `python tools/check_site.py`, then the browser suite `python tools/smoke_test.py` (Playwright: `pip install playwright` and `python -m playwright install chromium`), which runs the shared toolbox checks plus `tests/site_test.py`. Every push to `main` deploys to GitHub Pages via `.github/workflows/pages.yml`, which stamps the commit id over `?v=dev` on the asset links.
 
 ## Credits and license
 - Code: MIT, see [LICENSE](LICENSE).
