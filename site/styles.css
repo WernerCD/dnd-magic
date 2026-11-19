@@ -451,6 +451,11 @@ a.srctag:hover { text-decoration: underline; }
 .mine-charts { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 10px; }
 .mine-charts h3 { font-family: Inter, system-ui, sans-serif; font-size: .78rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; }
 .mine-charts .plot + h3 { margin-top: 14px; }
+/* source picker group headings (STYLE 6f) and the import offer (6g) */
+.src-group { font-size: .72rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); padding: 8px 2px 2px; border-top: 1px solid var(--line); margin-top: 4px; }
+.src-group:first-child { border-top: 0; margin-top: 0; padding-top: 2px; }
+.impoffer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.impoffer[hidden] { display: none; }
 .pfacts, .ptier { display: none; }
 .row .nm, .card .nm, .linkish { min-height: 24px; }
 @media print {

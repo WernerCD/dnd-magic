@@ -229,7 +229,7 @@
       x.name = (ch.name + "'s spells").slice(0, 60);
       if (LS.lists.length === 1 && !LS.lists[0].items.length && !LS.lists[0].ch) LS.lists = [];
       LS.lists.push(x); L = x;
-      var q2 = quietChars; quietChars = true; try { DC.setLink(ch.id, REPO, { list: x.id }); } finally { quietChars = q2; }
+      setMyLink(ch, { list: x.id });
       notice('Added ' + ch.name + "'s shared spell list (" + x.items.length + ' spells).');
     } else {
       x.name = (ch.name + "'s spells (shared)").slice(0, 60);
@@ -373,6 +373,14 @@
   }
   // a linked character was deleted: keep the list, drop the link quietly
   function unlinkGone(x) { if (x.ch && !charOf(x)) { delete x.ch; delete x.chSig; delete x.chK; delete x.chPend; return true; } return false; }
+  // this site's link data for a character, merged (keeps list and impAt side by side)
+  function setMyLink(ch, patch) {
+    var cur = DC.get(ch.id), o = {}, k, old = (cur && cur.links[REPO]) || {};
+    for (k in old) o[k] = old[k];
+    for (k in patch) { if (patch[k] === undefined) delete o[k]; else o[k] = patch[k]; }
+    var q = quietChars; quietChars = true;
+    try { DC.setLink(ch.id, REPO, Object.keys(o).length ? o : null); } finally { quietChars = q; }
+  }
   function charLists(ch) { return LS.lists.filter(function (x) { return x.ch === ch.id; }); }
   // switch to the active character's list, creating it if needed; quiet = no notices
   function useChar(ch, quiet) {
@@ -389,7 +397,7 @@
     }
     if (x.chSig) reconcile(x, ch); else syncList(x, ch);
     L = x;
-    if (link.list !== x.id) DC.setLink(ch.id, REPO, { list: x.id });
+    if (link.list !== x.id) setMyLink(ch, { list: x.id });
     return true;
   }
   // characters changed (here, in another tab, or on another site): resync linked lists, follow the active one
@@ -427,6 +435,7 @@
     });
     var aid = active ? active.id : null;
     if (active && takeShared(active)) changed = true;
+    checkImport(active);
     if (aid !== lastActive) {
       lastActive = aid;
       store.set('dm.char', aid);
@@ -455,7 +464,7 @@
       classes: cls.map(function (x) { return { cls: x.cls, lvl: x.lvl, sub: x.sub, subName: x.subName }; }).concat(plain), links: {} }, REPO);
     L.ch = ch.id; L.chSig = charSig(ch); L.chK = JSON.stringify(L.k);
     saveLists();
-    DC.setLink(ch.id, REPO, { list: L.id });
+    setMyLink(ch, { list: L.id });
     lastActive = ch.id;
     store.set('dm.char', ch.id);
     DC.setActive(ch.id);
@@ -471,6 +480,50 @@
       '<button type="button" class="btn" id="charApply">Use the character\'s classes</button> <button type="button" class="btn" id="charKeep">Keep mine</button></span>';
     return '<span class="small muted charnote">Linked to <b>' + esc(ch.name) + '</b> (' + esc(DC.summary(ch)) + '). Level-ups made on other sites update this list; if you change the classes here, you will be asked first.' +
       ' <button type="button" class="linkish" id="unlinkChar">Unlink</button></span>';
+  }
+
+  var IMP_SRC = { ddb: 'D&D Beyond', foundry: 'Foundry VTT', fc5: 'Fight Club 5' };
+  // a newer import than this site last looked at: show the offer (once per import)
+  function checkImport(ch) {
+    var box = $('#impOffer');
+    if (!DC || !ch || !ch.imp || !Array.isArray(ch.imp.spells) || !ch.imp.spells.length || !ch.imp.at) { if (box && box.dataset.ch === (ch && ch.id)) box.hidden = true; return; }
+    var link = ch.links[REPO] || {};
+    if (link.impAt && String(link.impAt) >= String(ch.imp.at)) return;
+    var src = IMP_SRC[ch.imp.src] || 'another site', was = box.hidden;
+    box.dataset.ch = ch.id;
+    box.innerHTML = '<span><b>' + esc(ch.name) + '</b> was imported from ' + esc(src) + ' with ' + ch.imp.spells.length + ' spell' + (ch.imp.spells.length === 1 ? '' : 's') + '.</span> ' +
+      '<button type="button" class="btn" id="impYes">Make a list from the spells imported from ' + esc(src) + '</button> <button type="button" class="btn" id="impNo">Not now</button>';
+    box.hidden = false;
+    if (was && window.DndUI) DndUI.enter(box);
+  }
+  // build a new list from the import; never touches an existing list
+  function makeImportList(ch) {
+    var ed = ch.imp.ed === '2014' || ch.imp.ed === '2024' ? ch.imp.ed : ch.ed, src = IMP_SRC[ch.imp.src] || 'import';
+    var x = { id: uid(), name: (ch.name + "'s spells (" + src + ')').slice(0, 60), ed: ed, k: [], items: [], rt: {}, ch: ch.id };
+    if (charRows(ch).length) syncList(x, ch); else x.k = [cleanRow({})];
+    var missed = [], seen = {};
+    ch.imp.spells.forEach(function (sp) {
+      var n = String(sp && sp.n || '').trim(); if (!n) return;
+      var c = (BYNAME[norm(n)] || []).filter(function (s) { return ed === '2014' ? s.ed === '2014' : (s.ed === '2024' || s.legacy); });
+      c.sort(function (a, b) { return (a.ed === ed ? 0 : 1) - (b.ed === ed ? 0 : 1); });
+      if (!c[0]) { if (missed.indexOf(n) < 0) missed.push(n); return; }
+      if (seen[c[0].id]) return; seen[c[0].id] = 1;
+      var it = { id: c[0].id, t: '', n: '', p: !!sp.p }, cls = String(sp.cls || '').toLowerCase();
+      if (x.k.some(function (r) { return r.cls === cls; })) it.c = cls;
+      x.items.push(it);
+    });
+    if (LS.lists.length === 1 && !LS.lists[0].items.length && !LS.lists[0].ch) LS.lists = [];
+    // the character's own lists that are still empty (made automatically on a first visit) give way to the import
+    var empty = function (y) { return !y.items.length && !Object.keys(y.rt || {}).length; };
+    var mine = charLists(ch);
+    if (mine.length && mine.every(empty)) LS.lists = LS.lists.filter(function (y) { return mine.indexOf(y) < 0; });
+    LS.lists.push(x); L = x;
+    if (!LS.lists.length) LS.lists = [x];
+    var first = !charLists(ch).some(function (y) { return y !== x; });
+    setMyLink(ch, first ? { list: x.id, impAt: ch.imp.at } : { impAt: ch.imp.at });
+    saveLists(); renderAll();
+    notice('Made "' + x.name + '" with ' + x.items.length + ' spell' + (x.items.length === 1 ? '' : 's') + '.' +
+      (missed.length ? ' Not found in the ' + ed + ' spell data, so left out: ' + missed.slice(0, 12).join(', ') + (missed.length > 12 ? ' and ' + (missed.length - 12) + ' more' : '') + '.' : ''));
   }
 
   // ------------------------------------------------------------ share / export
@@ -577,7 +630,8 @@
       else if (v) bad.push(k + '=' + v);
     });
     if (p.get('sort')) { if (['level', 'name', 'school', 'src', 'rate'].indexOf(p.get('sort')) >= 0) F.sort = p.get('sort'); else bad.push('sort=' + p.get('sort')); }
-    if (p.get('books') && p.get('books') !== 'all') {
+    if (p.get('books') === 'all') F.books = Object.keys(DATA.books);
+    else if (p.get('books')) {
       var bk = p.get('books').split(',');
       F.books = bk.filter(function (k) { return DATA.books[k]; });
       bk.forEach(function (k) { if (!DATA.books[k]) bad.push('books=' + k); });
@@ -598,7 +652,7 @@
     if (F.q) p.set('q', F.q);
     MENUS.forEach(function (M) { if (F[M.k].length) p.set(M.p, F[M.k].join(',')); });
     if (F.sort !== 'level') p.set('sort', F.sort);
-    if (F.books) p.set('books', F.books.join(','));
+    if (F.books && !sameBooks(F.books, DEF_BOOKS)) p.set('books', POOL_SRC.every(function (k) { return F.books.indexOf(k) >= 0; }) ? 'all' : F.books.join(','));
     if (F.scope === 'all') p.set('scope', 'all');
     else if (F.only) p.set('only', F.only);
     if (F.view !== 'stats') p.set('view', F.view);
@@ -744,15 +798,28 @@
 
   // ------------------------------------------------------------ filters
   var POOL = [], CTX = [], COMBO = null;
+  var POOL_SRC = [], DEF_BOOKS = [];
   function prepare() {
     POOL = pool(); CTX = contexts(); COMBO = combine(CTX);
+    var seen = {};
+    POOL_SRC = [];
+    POOL.forEach(function (sp) { if (!seen[sp.src]) { seen[sp.src] = 1; POOL_SRC.push(sp.src); } });
+    POOL_SRC = window.DndSources ? DndSources.sort(POOL_SRC) : POOL_SRC.sort();
+    DEF_BOOKS = window.DndSources ? DndSources.defaults(POOL_SRC) : POOL_SRC.slice();
   }
+  // the books in use: the reader's own choice, else the core books (never "all" by default)
+  function effBooks() { return F.books || DEF_BOOKS; }
+  function sameBooks(a, b) {
+    var x = a.filter(function (k) { return POOL_SRC.indexOf(k) >= 0; }).sort().join(), y = b.filter(function (k) { return POOL_SRC.indexOf(k) >= 0; }).sort().join();
+    return x === y;
+  }
+  function setBooks(list) { F.books = sameBooks(list, DEF_BOOKS) ? null : list; }
   function passBase(s, m) {
     return !(F.scope === 'class' && !m.on);
   }
   function passFilters(s, m, skip) {
     if (F.q && norm(s.name).indexOf(norm(F.q)) < 0) return false;
-    if (skip !== 'books' && F.books && F.books.indexOf(s.src) < 0) return false;
+    if (skip !== 'books' && effBooks().indexOf(s.src) < 0) return false;
     for (var i = 0; i < MENUS.length; i++) if (MENUS[i].k !== skip && !menuOK(MENUS[i], s)) return false;
     if (F.castable && s.lvl > 0 && s.lvl > learnMax(m)) return false;
     if (F.castable && s.lvl === 0 && !hasCantrips(m)) return false;
@@ -858,20 +925,18 @@
     var cnt = {};
     POOL.forEach(function (s) { cnt[s.src] = 0; });
     BASE.forEach(function (r) { if (passFilters(r.s, r.m, 'books')) cnt[r.s.src]++; });
-    var codes = Object.keys(cnt).sort(function (a, b) {
-      var A = DATA.books[a], B = DATA.books[b];
-      if (A.core !== B.core) return A.core ? -1 : 1;
-      return A.pub < B.pub ? -1 : 1;
-    });
-    var q = norm($('#srcQ').value || '');
-    $('#srcList').innerHTML = codes.map(function (k) {
-      var b = DATA.books[k], on = !F.books || F.books.indexOf(k) >= 0;
+    var codes = POOL_SRC.slice(), eff = effBooks(), q = norm($('#srcQ').value || ''), grp = null, html = '';
+    codes.forEach(function (k) {
+      var b = DATA.books[k], on = eff.indexOf(k) >= 0;
       var hide = q && norm(b.name).indexOf(q) < 0 && norm(k).indexOf(q) < 0;
-      return '<label class="srcrow' + (cnt[k] || (F.books && on) ? '' : ' zero') + '" style="--h:' + b.h + '"' + (hide ? ' hidden' : '') + '><input type="checkbox" data-src="' + k + '"' + (on ? ' checked' : '') + '><span class="dot"></span><span>' + esc(b.name) + '</span><span class="n">' + cnt[k] + '</span></label>';
-    }).join('');
-    var sel = F.books ? F.books.filter(function (k) { return k in cnt; }).length : codes.length;
-    $('#srcSum').textContent = sel === codes.length ? 'Sources' : 'Sources (' + sel + '/' + codes.length + ')';
-    $('#srcPick').classList.toggle('filtered', sel !== codes.length);
+      var g = window.DndSources ? DndSources.info(k).groupName : '';
+      if (g !== grp && !q) { grp = g; html += '<div class="src-group">' + esc(g) + '</div>'; }
+      html += '<label class="srcrow' + (cnt[k] || on ? '' : ' zero') + '" style="--h:' + b.h + '"' + (hide ? ' hidden' : '') + '><input type="checkbox" data-src="' + k + '"' + (on ? ' checked' : '') + '><span class="dot"></span><span>' + esc(b.name) + '</span><span class="n">' + cnt[k] + '</span></label>';
+    });
+    $('#srcList').innerHTML = html;
+    var sel = codes.filter(function (k) { return eff.indexOf(k) >= 0; }).length, isDef = !F.books || sameBooks(F.books, DEF_BOOKS);
+    $('#srcSum').textContent = isDef ? 'Sources: core' : sel === codes.length ? 'Sources: all' : 'Sources (' + sel + '/' + codes.length + ')';
+    $('#srcPick').classList.toggle('filtered', !isDef);
   }
 
   // ------------------------------------------------------------ cards
@@ -1302,7 +1367,7 @@
       if (e.target.closest('#unlinkChar')) {
         var och = charOf(L);
         delete L.ch; delete L.chSig; delete L.chK; delete L.chPend;
-        if (och && (och.links[REPO] || {}).list === L.id) DC.setLink(och.id, REPO, null);
+        if (och && (och.links[REPO] || {}).list === L.id) setMyLink(och, { list: undefined });
         saveLists(); renderAll(); notice('This list is no longer linked to a character.');
         return;
       }
@@ -1416,11 +1481,10 @@
       }
       if (t.dataset.prep) { var ip = item(t.dataset.prep); if (ip) { ip.p = t.checked; saveLists(); renderMine(); var c = $('#groups [data-prep="' + ip.id + '"]'); if (c) c.focus(); } return; }
       if (t.dataset.src) {
-        var all = Object.keys(DATA.books);
-        var cur = F.books ? F.books.slice() : all.slice();
+        var cur = effBooks().slice();
         var k = cur.indexOf(t.dataset.src);
         if (t.checked && k < 0) cur.push(t.dataset.src); else if (!t.checked && k >= 0) cur.splice(k, 1);
-        F.books = cur.length >= all.length ? null : cur;
+        setBooks(cur);
         shown = PAGE; renderSources(); renderList(); writeUrl();
       }
     });
@@ -1443,6 +1507,12 @@
           editing[t.dataset.noteedit] = false; renderMine();
         }, 0);
       }
+    });
+    $('#impOffer').addEventListener('click', function (e) {
+      var ch = DC && DC.get(this.dataset.ch);
+      if (!ch || !ch.imp) { this.hidden = true; return; }
+      if (e.target.closest('#impYes')) { this.hidden = true; makeImportList(ch); }
+      else if (e.target.closest('#impNo')) { this.hidden = true; setMyLink(ch, { impAt: ch.imp.at }); }
     });
     window.addEventListener('storage', function (e) {
       if (e.key !== 'dm.lists' || !e.newValue) return;
@@ -1497,11 +1567,11 @@
     $('#hidePicked').addEventListener('change', function () { F.hidePicked = this.checked; shown = PAGE; renderList(); writeUrl(); });
     $('#optTog').addEventListener('change', function () { F.opt = this.checked; shown = PAGE; prepare(); renderFilters(); renderList(); renderMine(); writeUrl(); });
     $('#srcQ').addEventListener('input', renderSources);
-    $('#srcCore').addEventListener('click', function () { F.books = Object.keys(DATA.books).filter(function (k) { return DATA.books[k].core; }); renderSources(); renderList(); writeUrl(); });
-    $('#srcAll').addEventListener('click', function () { F.books = null; renderSources(); renderList(); writeUrl(); });
+    $('#srcCore').addEventListener('click', function () { F.books = null; renderSources(); renderList(); writeUrl(); });
+    $('#srcAll').addEventListener('click', function () { setBooks(POOL_SRC.slice()); renderSources(); renderList(); writeUrl(); });
     $('#srcNone').addEventListener('click', function () { F.books = []; renderSources(); renderList(); writeUrl(); });
     $('#srcShown').addEventListener('click', function () {
-      F.books = $$('#srcList .srcrow:not([hidden]) input').map(function (i) { return i.dataset.src; });
+      setBooks($$('#srcList .srcrow:not([hidden]) input').map(function (i) { return i.dataset.src; }));
       renderSources(); renderList(); writeUrl();
     });
     $('#resetBtn').addEventListener('click', function () { var v = F.view; F = defaults(); F.view = v; shown = PAGE; prepare(); renderFilters(); renderList(); writeUrl(); });
@@ -1542,6 +1612,7 @@
       var act = DC.active();
       lastActive = act ? act.id : null;
       if (act && takeShared(act)) hadShare = true;
+      checkImport(act);
       // switch to the character's list; make one only for a character this site has not seen active before
       // (so a list the user unlinked does not come back on the next visit)
       if (act && !hadShare && L.ch !== act.id && (charLists(act).length || store.get('dm.char', null) !== act.id)) useChar(act, true);
